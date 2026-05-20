@@ -1,3 +1,31 @@
+# =========================================================
+# 실전형 선거예측 시스템 Ultimate Edition
+# =========================================================
+#
+# 주요 기능
+#
+# - 후보 1~5명
+# - 여론조사 무제한 입력
+# - 저장 / 불러오기
+# - 여론조사 수정 / 삭제
+# - 날짜 자동 정렬
+# - House Effect 제거
+# - 시간 가중치(Time Decay)
+# - 표본오차 자동 계산
+# - 조사별 Dynamic R
+# - Kalman Filter
+# - 무당층 자동 계산
+# - 무당층 독립 추세
+# - 무당층 내부 선호 독립 추세
+# - 불확실성 기반 추세
+# - Monte Carlo 시뮬레이션
+# - 승률 계산
+# - 신뢰구간 계산
+# - 미래 점선 예측
+# - 추세 밴드 시각화
+#
+# =========================================================
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -7,56 +35,173 @@ from filterpy.kalman import KalmanFilter
 
 import plotly.graph_objects as go
 
+import json
+import os
+
 # =========================================================
-# 페이지 설정
+# 기본 설정
 # =========================================================
 
 st.set_page_config(
-    page_title="실전형 선거 예측 시스템",
+    page_title="실전형 선거예측 시스템",
     layout="wide"
 )
 
-st.title("실전형 선거 예측 시스템")
+SAVE_DIR = "saved_simulations"
+
+os.makedirs(
+    SAVE_DIR,
+    exist_ok=True
+)
+
+# =========================================================
+# 타이틀
+# =========================================================
+
+st.title("실전형 선거예측 시스템")
 
 st.markdown("""
-### 지원 기능
+### Ultimate Edition
 
-- 후보 1~5명 지원
-- 여론조사 무제한 입력
-- 날짜 자동 정렬
 - House Effect 제거
-- 표본수 기반 가중치
-- 조사별 표준오차 자동 계산
-- 무당층 자동 계산
-- 무당층 내부 선호 반영
-- 무당층 표준오차 계산
+- 표본오차 기반 불확실성 추세
+- Time Decay
 - Kalman Filter
-- 조사별 동적 R 적용
-- 선거일까지 미래 예측
-- Monte Carlo 시뮬레이션
+- 무당층 독립 추세
+- Monte Carlo
 - 승률 계산
-- 자동 100% 정규화
-- 미래 추세 점선 표시
+- 신뢰구간
+- 미래 점선 예측
 """)
 
 # =========================================================
 # 세션 상태
 # =========================================================
 
+if "simulation_name" not in st.session_state:
+    st.session_state.simulation_name = ""
+
+if "candidate_names" not in st.session_state:
+    st.session_state.candidate_names = []
+
 if "polls" not in st.session_state:
     st.session_state.polls = []
+
+# =========================================================
+# 시뮬레이션 메뉴
+# =========================================================
+
+st.header("1. 시뮬레이션")
+
+menu = st.radio(
+    "선택",
+    [
+        "새 시뮬레이션",
+        "불러오기"
+    ]
+)
+
+# =========================================================
+# 새 시뮬레이션
+# =========================================================
+
+if menu == "새 시뮬레이션":
+
+    sim_name = st.text_input(
+        "시뮬레이션 이름"
+    )
+
+    if st.button("생성"):
+
+        if sim_name.strip() == "":
+
+            st.error("이름 입력")
+
+        else:
+
+            st.session_state.simulation_name = sim_name
+
+            st.session_state.candidate_names = []
+
+            st.session_state.polls = []
+
+            st.success("생성 완료")
+
+# =========================================================
+# 불러오기
+# =========================================================
+
+else:
+
+    saved_files = [
+
+        f.replace(".json","")
+
+        for f in os.listdir(SAVE_DIR)
+
+        if f.endswith(".json")
+    ]
+
+    if len(saved_files) == 0:
+
+        st.warning("저장된 시뮬레이션 없음")
+
+    else:
+
+        selected = st.selectbox(
+            "불러올 시뮬레이션",
+            saved_files
+        )
+
+        if st.button("불러오기"):
+
+            with open(
+                f"{SAVE_DIR}/{selected}.json",
+                "r",
+                encoding="utf-8"
+            ) as f:
+
+                data = json.load(f)
+
+            st.session_state.simulation_name = data["simulation_name"]
+
+            st.session_state.candidate_names = data["candidate_names"]
+
+            st.session_state.polls = data["polls"]
+
+            st.success("불러오기 완료")
+
+# =========================================================
+# 종료
+# =========================================================
+
+if st.session_state.simulation_name == "":
+
+    st.stop()
+
+# =========================================================
+# 현재 시뮬레이션
+# =========================================================
+
+st.success(
+    f"현재 시뮬레이션: "
+    f"{st.session_state.simulation_name}"
+)
 
 # =========================================================
 # 후보 입력
 # =========================================================
 
-st.header("1. 후보 입력")
+st.header("2. 후보 입력")
 
 candidate_count = st.slider(
     "후보 수",
     1,
     5,
-    2
+    max(
+        2,
+        len(st.session_state.candidate_names)
+    )
 )
 
 candidate_names = []
@@ -65,28 +210,33 @@ cols = st.columns(candidate_count)
 
 for i in range(candidate_count):
 
+    default_name = ""
+
+    if i < len(st.session_state.candidate_names):
+
+        default_name = (
+            st.session_state.candidate_names[i]
+        )
+
     with cols[i]:
 
         name = st.text_input(
             f"후보 {i+1}",
+            value=default_name,
             key=f"candidate_{i}"
         )
 
         if name.strip() != "":
+
             candidate_names.append(name.strip())
 
-# 후보 중복 검사
-if len(candidate_names) != len(set(candidate_names)):
-
-    st.error("후보 이름이 중복되었습니다.")
-
-    st.stop()
+st.session_state.candidate_names = candidate_names
 
 # =========================================================
-# 선거일 입력
+# 선거일
 # =========================================================
 
-st.header("2. 선거일 입력")
+st.header("3. 선거일")
 
 election_day = st.date_input(
     "선거일"
@@ -96,10 +246,10 @@ election_day = st.date_input(
 # Kalman 옵션
 # =========================================================
 
-st.header("3. Kalman Filter 설정")
+st.header("4. 시스템 설정")
 
-R_option = st.select_slider(
-    "R 민감도",
+trust_level = st.select_slider(
+    "여론조사 신뢰도",
     options=[
         "매우 낮음",
         "낮음",
@@ -110,8 +260,8 @@ R_option = st.select_slider(
     value="보통"
 )
 
-Q_option = st.select_slider(
-    "Q 민감도",
+trend_sensitivity = st.select_slider(
+    "민심 변화 민감도",
     options=[
         "매우 낮음",
         "낮음",
@@ -122,15 +272,33 @@ Q_option = st.select_slider(
     value="보통"
 )
 
-R_map = {
-    "매우 낮음": 0.5,
-    "낮음": 1.0,
+time_decay_strength = st.select_slider(
+    "최신 여론조사 우선 반영",
+    options=[
+        "매우 낮음",
+        "낮음",
+        "보통",
+        "높음",
+        "매우 높음"
+    ],
+    value="높음"
+)
+
+# =========================================================
+# 내부 값 매핑
+# =========================================================
+
+R_MAP = {
+
+    "매우 낮음": 8.0,
+    "낮음": 4.0,
     "보통": 2.0,
-    "높음": 4.0,
-    "매우 높음": 8.0
+    "높음": 1.0,
+    "매우 높음": 0.5
 }
 
-Q_map = {
+Q_MAP = {
+
     "매우 낮음": 0.01,
     "낮음": 0.03,
     "보통": 0.05,
@@ -138,16 +306,28 @@ Q_map = {
     "매우 높음": 0.2
 }
 
-BASE_R = R_map[R_option]
-Q_VALUE = Q_map[Q_option]
+DECAY_MAP = {
+
+    "매우 낮음": 0.003,
+    "낮음": 0.007,
+    "보통": 0.015,
+    "높음": 0.03,
+    "매우 높음": 0.05
+}
+
+BASE_R = R_MAP[trust_level]
+
+Q_VALUE = Q_MAP[trend_sensitivity]
+
+LAMBDA = DECAY_MAP[time_decay_strength]
 
 # =========================================================
 # 여론조사 입력
 # =========================================================
 
-st.header("4. 여론조사 입력")
+st.header("5. 여론조사 입력")
 
-with st.form("poll_input_form"):
+with st.form("poll_form"):
 
     pollster = st.text_input(
         "조사기관"
@@ -181,23 +361,19 @@ with st.form("poll_input_form"):
         max(1, len(candidate_names))
     )
 
-    for idx, candidate in enumerate(candidate_names):
+    for idx, c in enumerate(candidate_names):
 
         with cols[idx]:
 
             val = st.number_input(
-                f"{candidate} (%)",
+                f"{c} (%)",
                 min_value=0.0,
                 max_value=100.0,
                 step=0.1,
-                key=f"support_{candidate}"
+                key=f"support_{c}"
             )
 
-            supports[candidate] = val
-
-    # =====================================================
-    # 무당층 자동 계산
-    # =====================================================
+            supports[c] = val
 
     undecided = (
         100
@@ -214,11 +390,7 @@ with st.form("poll_input_form"):
         f"{round(undecided,2)}%"
     )
 
-    # =====================================================
-    # 무당층 내부 선호
-    # =====================================================
-
-    st.subheader("무당층 내부 후보 선호")
+    st.subheader("무당층 내부 선호")
 
     undecided_pref = {}
 
@@ -226,138 +398,164 @@ with st.form("poll_input_form"):
         max(1, len(candidate_names))
     )
 
-    for idx, candidate in enumerate(candidate_names):
+    for idx, c in enumerate(candidate_names):
 
         with cols2[idx]:
 
             pref = st.number_input(
-                f"{candidate} 선호 (%)",
+                f"{c} 선호 (%)",
                 min_value=0.0,
                 max_value=100.0,
                 step=0.1,
-                key=f"pref_{candidate}"
+                key=f"pref_{c}"
             )
 
-            undecided_pref[candidate] = pref
+            undecided_pref[c] = pref
 
-    submit = st.form_submit_button(
+    add_poll = st.form_submit_button(
         "여론조사 추가"
     )
 
-    if submit:
+    if add_poll:
 
-        if pollster.strip() == "":
+        st.session_state.polls.append({
 
-            st.error("조사기관 이름을 입력하세요.")
+            "pollster": pollster,
 
-        elif end_date < start_date:
+            "start_date": str(start_date),
 
-            st.error("날짜가 올바르지 않습니다.")
+            "end_date": str(end_date),
 
-        elif sum(supports.values()) > 100:
+            "sample_size": sample_size,
 
-            st.error("후보 지지율 합계가 100 초과입니다.")
+            "supports": supports,
 
-        elif sum(undecided_pref.values()) > 100:
+            "undecided": undecided,
 
-            st.error("무당층 내부 선호 합계가 100 초과입니다.")
+            "undecided_pref": undecided_pref
+        })
 
-        else:
-
-            st.session_state.polls.append({
-
-                "pollster": pollster,
-
-                "start_date": str(start_date),
-
-                "end_date": str(end_date),
-
-                "sample_size": sample_size,
-
-                "undecided": undecided,
-
-                "supports": supports,
-
-                "undecided_pref": undecided_pref
-            })
-
-            st.success("여론조사가 추가되었습니다.")
+        st.success("추가 완료")
 
 # =========================================================
-# 입력 데이터 표시
+# 여론조사 표시
 # =========================================================
 
-st.header("5. 입력된 여론조사")
+st.header("6. 입력된 여론조사")
 
 if len(st.session_state.polls) == 0:
 
-    st.warning("입력된 여론조사가 없습니다.")
+    st.warning("입력된 조사 없음")
 
 else:
 
-    rows = []
+    delete_index = None
 
-    for poll in st.session_state.polls:
+    for idx, poll in enumerate(
+        st.session_state.polls
+    ):
 
-        row = {
+        with st.expander(
+            f"{poll['pollster']} | "
+            f"{poll['end_date']}"
+        ):
 
-            "기관": poll["pollster"],
+            st.write(
+                f"표본수: "
+                f"{poll['sample_size']}"
+            )
 
-            "종료일": poll["end_date"],
+            st.write(
+                f"무당층: "
+                f"{round(poll['undecided'],2)}%"
+            )
 
-            "표본수": poll["sample_size"],
+            st.json(
+                poll["supports"]
+            )
 
-            "무당층": poll["undecided"]
-        }
+            st.json(
+                poll["undecided_pref"]
+            )
 
-        for c in candidate_names:
+            if st.button(
+                f"삭제 {idx}",
+                key=f"delete_{idx}"
+            ):
 
-            row[c] = poll["supports"][c]
+                delete_index = idx
 
-        rows.append(row)
+    if delete_index is not None:
 
-    display_df = pd.DataFrame(rows)
+        st.session_state.polls.pop(
+            delete_index
+        )
 
-    display_df["종료일"] = pd.to_datetime(
-        display_df["종료일"]
-    )
+        st.rerun()
 
-    display_df = display_df.sort_values(
-        "종료일"
-    )
+# =========================================================
+# 저장
+# =========================================================
 
-    st.dataframe(
-        display_df,
-        use_container_width=True
-    )
+st.header("7. 저장")
+
+if st.button("시뮬레이션 저장"):
+
+    data = {
+
+        "simulation_name":
+            st.session_state.simulation_name,
+
+        "candidate_names":
+            st.session_state.candidate_names,
+
+        "polls":
+            st.session_state.polls
+    }
+
+    with open(
+        f"{SAVE_DIR}/"
+        f"{st.session_state.simulation_name}.json",
+        "w",
+        encoding="utf-8"
+    ) as f:
+
+        json.dump(
+            data,
+            f,
+            ensure_ascii=False,
+            indent=4
+        )
+
+    st.success("저장 완료")
+
+# =========================================================
+# 예측 시작
+# =========================================================
+
+st.header("8. 예측")
+
+RUN_SIMULATION = st.button(
+    "예측 실행"
+)
 
 # =========================================================
 # 예측 실행
 # =========================================================
 
-st.header("6. 예측 실행")
-
-run_button = st.button(
-    "예측 시작"
-)
-
-if run_button:
+if RUN_SIMULATION:
 
     if len(candidate_names) == 0:
 
-        st.error("후보를 입력하세요.")
+        st.error("후보 입력 필요")
 
         st.stop()
 
     if len(st.session_state.polls) < 2:
 
-        st.error("최소 2개 이상의 여론조사가 필요합니다.")
+        st.error("최소 2개 조사 필요")
 
         st.stop()
-
-    # =====================================================
-    # 데이터프레임 생성
-    # =====================================================
 
     rows = []
 
@@ -391,6 +589,24 @@ if run_button:
     df = df.sort_values("end_date")
 
     # =====================================================
+    # Time Decay
+    # =====================================================
+
+    latest_date = df["end_date"].max()
+
+    df["days_old"] = (
+
+        latest_date
+        -
+        df["end_date"]
+
+    ).dt.days
+
+    df["time_weight"] = np.exp(
+        -LAMBDA * df["days_old"]
+    )
+
+    # =====================================================
     # House Effect 제거
     # =====================================================
 
@@ -398,16 +614,30 @@ if run_button:
 
         overall_mean = np.average(
             df[c],
-            weights=df["sample_size"]
+            weights=(
+                df["sample_size"]
+                *
+                df["time_weight"]
+            )
         )
 
         pollster_mean = (
+
             df.groupby("pollster")
+
             .apply(
+
                 lambda x:
+
                 np.average(
+
                     x[c],
-                    weights=x["sample_size"]
+
+                    weights=(
+                        x["sample_size"]
+                        *
+                        x["time_weight"]
+                    )
                 )
             )
         )
@@ -429,7 +659,7 @@ if run_button:
         )
 
     # =====================================================
-    # Kalman 함수
+    # Kalman
     # =====================================================
 
     def run_kalman(values, r_values):
@@ -488,7 +718,7 @@ if run_button:
     # 후보별 계산
     # =====================================================
 
-    for candidate in candidate_names:
+    for c in candidate_names:
 
         temp = (
             df.groupby("end_date")
@@ -501,50 +731,121 @@ if run_button:
         )
 
         # =================================================
-        # 조사별 표준오차
+        # Dynamic R
         # =================================================
 
-        se_list = []
+        dynamic_r = []
 
         for idx, row in temp.iterrows():
 
-            p = row[f"{candidate}_adjusted"] / 100
+            p = row[f"{c}_adjusted"] / 100
 
-            n = max(row["sample_size"], 1)
+            n = max(
+                row["sample_size"],
+                1
+            )
 
             se = np.sqrt(
                 (p * (1-p)) / n
             )
 
-            se = max(se, 0.0001)
-
-            se_list.append(
-                (se * 100)**2
+            se = max(
+                se,
+                0.0001
             )
 
-        temp["dynamic_r"] = se_list
+            r_value = (
+                (se * 100)**2
+            ) * BASE_R
+
+            dynamic_r.append(
+                r_value
+            )
+
+        temp["dynamic_r"] = dynamic_r
+
+        # =================================================
+        # 입력 자체를 랜덤화
+        # =================================================
+
+        sampled_supports = []
+
+        sampled_prefs = []
+
+        sampled_undecided = []
+
+        for idx, row in temp.iterrows():
+
+            se = np.sqrt(
+                row["dynamic_r"]
+            )
+
+            sampled_supports.append(
+
+                np.random.normal(
+                    row[f"{c}_adjusted"],
+                    se
+                )
+            )
+
+            sampled_prefs.append(
+
+                np.random.normal(
+                    row[f"{c}_pref"],
+                    se
+                )
+            )
+
+            sampled_undecided.append(
+
+                np.random.normal(
+                    row["undecided"],
+                    se
+                )
+            )
+
+        temp["sampled_support"] = np.clip(
+            sampled_supports,
+            0,
+            100
+        )
+
+        temp["sampled_pref"] = np.clip(
+            sampled_prefs,
+            0,
+            100
+        )
+
+        temp["sampled_undecided"] = np.clip(
+            sampled_undecided,
+            0,
+            100
+        )
 
         # =================================================
         # Kalman
         # =================================================
 
         temp["support_kalman"] = (
+
             run_kalman(
-                temp[f"{candidate}_adjusted"],
+                temp["sampled_support"],
                 temp["dynamic_r"]
             )
         )
 
         temp["pref_kalman"] = (
+
             run_kalman(
-                temp[f"{candidate}_pref"],
+                temp["sampled_pref"],
                 temp["dynamic_r"]
             )
         )
 
         temp["undecided_kalman"] = (
+
             run_kalman(
-                temp["undecided"],
+                temp["sampled_undecided"],
                 temp["dynamic_r"]
             )
         )
@@ -604,59 +905,62 @@ if run_button:
         # 미래 예측
         # =================================================
 
-        predicted_support = (
+        core_support = (
+
             support_model.predict(
                 [[election_num]]
             )[0]
         )
 
-        predicted_pref = (
-            pref_model.predict(
-                [[election_num]]
-            )[0]
-        )
+        undecided_size = (
 
-        predicted_undecided = (
             undecided_model.predict(
                 [[election_num]]
             )[0]
         )
 
-        predicted_support = np.clip(
-            predicted_support,
+        undecided_pref = (
+
+            pref_model.predict(
+                [[election_num]]
+            )[0]
+        )
+
+        core_support = np.clip(
+            core_support,
             0,
             100
         )
 
-        predicted_pref = np.clip(
-            predicted_pref,
+        undecided_size = np.clip(
+            undecided_size,
             0,
             100
         )
 
-        predicted_undecided = np.clip(
-            predicted_undecided,
+        undecided_pref = np.clip(
+            undecided_pref,
             0,
             100
         )
 
         # =================================================
-        # 최종 예측
+        # 최종 결합
         # =================================================
 
         final_prediction = (
 
-            predicted_support
+            core_support
 
             +
 
             (
-                predicted_undecided
+                undecided_size
 
                 *
 
                 (
-                    predicted_pref / 100
+                    undecided_pref / 100
                 )
             )
         )
@@ -665,7 +969,10 @@ if run_button:
         # 표준오차 계산
         # =================================================
 
-        p = final_prediction / 100
+        p = max(
+            final_prediction / 100,
+            0.0001
+        )
 
         n = max(
             temp["sample_size"].mean(),
@@ -683,7 +990,7 @@ if run_button:
             *
 
             (
-                predicted_undecided / 100
+                undecided_size / 100
             )
         )
 
@@ -692,16 +999,23 @@ if run_button:
             1
         )
 
-        pref_p = predicted_pref / 100
+        undecided_p = max(
+            undecided_pref / 100,
+            0.0001
+        )
 
         undecided_se = np.sqrt(
             (
-                pref_p
+                undecided_p
                 *
                 (
-                    1 - pref_p
+                    1 - undecided_p
                 )
-            ) / undecided_n
+            )
+
+            /
+
+            undecided_n
         )
 
         combined_se = np.sqrt(
@@ -728,15 +1042,25 @@ if run_button:
 
         prediction_results.append({
 
-            "candidate": candidate,
+            "candidate": c,
 
             "prediction": final_prediction,
 
-            "simulations": simulations
+            "simulations": simulations,
+
+            "lower": np.percentile(
+                simulations,
+                2.5
+            ),
+
+            "upper": np.percentile(
+                simulations,
+                97.5
+            )
         })
 
         # =================================================
-        # 현재 추세선
+        # 추세선
         # =================================================
 
         fig.add_trace(
@@ -744,7 +1068,49 @@ if run_button:
                 x=temp["end_date"],
                 y=temp["support_kalman"],
                 mode="lines+markers",
-                name=f"{candidate} 추세"
+                name=f"{c} 추세"
+            )
+        )
+
+        # =================================================
+        # 신뢰구간 밴드
+        # =================================================
+
+        upper_band = (
+            temp["support_kalman"]
+            +
+            np.sqrt(temp["dynamic_r"])
+        )
+
+        lower_band = (
+            temp["support_kalman"]
+            -
+            np.sqrt(temp["dynamic_r"])
+        )
+
+        lower_band = np.clip(
+            lower_band,
+            0,
+            100
+        )
+
+        fig.add_trace(
+            go.Scatter(
+                x=temp["end_date"],
+                y=upper_band,
+                line=dict(width=0),
+                showlegend=False
+            )
+        )
+
+        fig.add_trace(
+            go.Scatter(
+                x=temp["end_date"],
+                y=lower_band,
+                fill='tonexty',
+                line=dict(width=0),
+                opacity=0.15,
+                showlegend=False
             )
         )
 
@@ -760,7 +1126,7 @@ if run_button:
             periods=30
         )
 
-        future_date_num = (
+        future_num = (
 
             future_dates
 
@@ -772,7 +1138,7 @@ if run_button:
 
         future_predictions = (
             support_model.predict(
-                future_date_num
+                future_num
             )
         )
 
@@ -790,12 +1156,12 @@ if run_button:
                 line=dict(
                     dash="dash"
                 ),
-                name=f"{candidate} 미래예측"
+                name=f"{c} 미래"
             )
         )
 
     # =====================================================
-    # 최종 정규화
+    # 정규화
     # =====================================================
 
     total_prediction = sum(
@@ -857,27 +1223,37 @@ if run_button:
         win_counts[winner] += 1
 
     # =====================================================
-    # 그래프 범위
+    # 그래프 축
     # =====================================================
 
     all_values = []
 
     for trace in fig.data:
 
-        all_values.extend(trace.y)
+        try:
 
-    y_max = max(all_values) + 5
+            all_values.extend(trace.y)
 
-    y_max = max(y_max, 20)
+        except:
 
-    y_max = min(y_max, 100)
+            pass
+
+    y_max = min(
+        max(all_values) + 5,
+        100
+    )
+
+    y_max = max(
+        y_max,
+        20
+    )
 
     fig.update_layout(
 
         template="plotly_white",
 
         yaxis=dict(
-            range=[0, y_max],
+            range=[0,y_max],
             ticksuffix="%"
         )
     )
@@ -891,7 +1267,7 @@ if run_button:
     # 결과 출력
     # =====================================================
 
-    st.header("7. 선거일 예측 결과")
+    st.header("9. 최종 예측")
 
     result_rows = []
 
@@ -911,10 +1287,16 @@ if run_button:
             "후보": candidate,
 
             "예상 득표율":
-                round(prediction, 2),
+                round(prediction,2),
 
             "승률":
-                round(win_rate, 2)
+                round(win_rate,2),
+
+            "95% 하한":
+                round(result["lower"],2),
+
+            "95% 상한":
+                round(result["upper"],2)
         })
 
     result_df = pd.DataFrame(
@@ -928,16 +1310,5 @@ if run_button:
 
     st.dataframe(
         result_df,
-        use_container_width=True
-    )
-
-    # =====================================================
-    # 세부 데이터
-    # =====================================================
-
-    st.header("8. 세부 데이터")
-
-    st.dataframe(
-        df,
         use_container_width=True
     )
