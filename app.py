@@ -19,15 +19,17 @@ st.set_page_config(
 st.title("정치 여론조사 예측 시스템")
 
 st.markdown("""
-### 지원 기능
+### 기능
 
 - House Effect 제거
 - 표본수 가중치 반영
-- Kalman Filter 추세 분석
+- 표준오차(SE) 자동 계산
 - 무당층 자동 계산
-- 무당층 선호 추세 분석
-- Monte Carlo 승률 계산
-- 선거일까지 미래 예측 점선 표시
+- 무당층 내부 표준오차 계산
+- Kalman Filter
+- 미래 예측 점선
+- Monte Carlo 시뮬레이션
+- 승률 계산
 - 자동 득표율 정규화
 """)
 
@@ -46,9 +48,9 @@ st.header("1. 후보 입력")
 
 candidate_count = st.slider(
     "후보 수",
-    min_value=1,
-    max_value=5,
-    value=2
+    1,
+    5,
+    2
 )
 
 candidate_names = []
@@ -60,7 +62,7 @@ for i in range(candidate_count):
     with cols[i]:
 
         name = st.text_input(
-            f"후보 {i+1} 이름",
+            f"후보 {i+1}",
             key=f"candidate_{i}"
         )
 
@@ -91,7 +93,7 @@ election_day = st.date_input(
 st.header("3. Kalman Filter 설정")
 
 R_option = st.select_slider(
-    "R 값 (여론조사 신뢰도)",
+    "R 값",
     options=[
         "매우 낮음",
         "낮음",
@@ -103,7 +105,7 @@ R_option = st.select_slider(
 )
 
 Q_option = st.select_slider(
-    "Q 값 (민심 변화 민감도)",
+    "Q 값",
     options=[
         "매우 낮음",
         "낮음",
@@ -201,14 +203,18 @@ with st.form("poll_form"):
     )
 
     undecided_total = max(
-        0,
-        undecided_total
+        undecided_total,
+        0
     )
 
     st.info(
         f"자동 계산된 무당층: "
         f"{round(undecided_total,2)}%"
     )
+
+    # =====================================================
+    # 무당층 내부 선호
+    # =====================================================
 
     st.subheader("무당층 내부 후보 선호")
 
@@ -238,10 +244,6 @@ with st.form("poll_form"):
 
     if submit:
 
-        pref_total = sum(
-            undecided_preferences.values()
-        )
-
         if pollster.strip() == "":
 
             st.error("""
@@ -260,7 +262,9 @@ with st.form("poll_form"):
 후보 지지율 합계가 100 초과입니다.
 """)
 
-        elif pref_total > 100:
+        elif sum(
+            undecided_preferences.values()
+        ) > 100:
 
             st.error("""
 무당층 내부 선호 합계가 100 초과입니다.
@@ -269,13 +273,14 @@ with st.form("poll_form"):
         else:
 
             poll = {
-                "pollster": pollster.strip(),
+                "pollster": pollster,
                 "start_date": str(start_date),
                 "end_date": str(end_date),
                 "sample_size": sample_size,
                 "undecided_total": undecided_total,
                 "supports": support_values,
-                "undecided_preferences": undecided_preferences
+                "undecided_preferences":
+                    undecided_preferences
             }
 
             st.session_state.polls.append(
@@ -287,7 +292,7 @@ with st.form("poll_form"):
 """)
 
 # =========================================================
-# 입력된 조사 출력
+# 입력 데이터 출력
 # =========================================================
 
 st.header("5. 입력된 여론조사")
@@ -295,7 +300,7 @@ st.header("5. 입력된 여론조사")
 if len(st.session_state.polls) == 0:
 
     st.warning("""
-입력된 여론조사가 없습니다.
+아직 입력된 여론조사가 없습니다.
 """)
 
 else:
@@ -305,8 +310,7 @@ else:
     for poll in st.session_state.polls:
 
         row = {
-            "조사기관": poll["pollster"],
-            "시작일": poll["start_date"],
+            "기관": poll["pollster"],
             "종료일": poll["end_date"],
             "표본수": poll["sample_size"],
             "무당층": poll["undecided_total"]
@@ -337,7 +341,7 @@ else:
     )
 
 # =========================================================
-# 예측 실행
+# 예측 시작
 # =========================================================
 
 st.header("6. 예측 실행")
@@ -372,7 +376,8 @@ if run_prediction:
                     poll["end_date"]
                 ),
                 "sample_size": poll["sample_size"],
-                "undecided_total": poll["undecided_total"]
+                "undecided_total":
+                    poll["undecided_total"]
             }
 
             for candidate in candidate_names:
@@ -391,15 +396,9 @@ if run_prediction:
 
         df = pd.DataFrame(rows)
 
-        unique_dates = df["end_date"].nunique()
-
-        if unique_dates < 2:
-
-            st.error("""
-서로 다른 날짜의 여론조사가 최소 2개 필요합니다.
-""")
-
-            st.stop()
+        df = df.sort_values(
+            "end_date"
+        )
 
         # =====================================================
         # House Effect 제거
@@ -428,14 +427,12 @@ if run_prediction:
                 - overall_mean
             )
 
-            df[f"{candidate}_house_effect"] = (
-                df["pollster"]
-                .map(house_effect)
-            )
-
             df[f"{candidate}_adjusted"] = (
                 df[candidate]
-                - df[f"{candidate}_house_effect"]
+                -
+                df["pollster"].map(
+                    house_effect
+                )
             )
 
         # =====================================================
@@ -486,14 +483,16 @@ if run_prediction:
             return filtered
 
         # =====================================================
-        # 추세 분석
+        # 그래프 생성
         # =====================================================
-
-        st.header("7. 추세 분석")
 
         fig = go.Figure()
 
         prediction_results = []
+
+        # =====================================================
+        # 후보별 계산
+        # =====================================================
 
         for candidate in candidate_names:
 
@@ -507,24 +506,43 @@ if run_prediction:
                 "end_date"
             )
 
-            temp["support_kalman"] = run_kalman(
-                temp[f"{candidate}_adjusted"]
+            # ================================================
+            # Kalman
+            # ================================================
+
+            temp["support_kalman"] = (
+                run_kalman(
+                    temp[f"{candidate}_adjusted"]
+                )
             )
 
-            temp["pref_kalman"] = run_kalman(
-                temp[f"{candidate}_pref"]
+            temp["pref_kalman"] = (
+                run_kalman(
+                    temp[f"{candidate}_pref"]
+                )
             )
 
-            temp["undecided_kalman"] = run_kalman(
-                temp["undecided_total"]
+            temp["undecided_kalman"] = (
+                run_kalman(
+                    temp["undecided_total"]
+                )
             )
+
+            # ================================================
+            # 날짜 숫자화
+            # ================================================
 
             temp["date_num"] = (
                 temp["end_date"]
-                - temp["end_date"].min()
+                -
+                temp["end_date"].min()
             ).dt.days
 
             X = temp[["date_num"]]
+
+            # ================================================
+            # 회귀 모델
+            # ================================================
 
             support_model = LinearRegression()
             pref_model = LinearRegression()
@@ -547,8 +565,13 @@ if run_prediction:
 
             election_num = (
                 pd.to_datetime(election_day)
-                - temp["end_date"].min()
+                -
+                temp["end_date"].min()
             ).days
+
+            # ================================================
+            # 선거일 예측
+            # ================================================
 
             predicted_support = (
                 support_model.predict(
@@ -568,6 +591,10 @@ if run_prediction:
                 )[0]
             )
 
+            # ================================================
+            # 범위 제한
+            # ================================================
+
             predicted_support = np.clip(
                 predicted_support,
                 0,
@@ -586,6 +613,10 @@ if run_prediction:
                 100
             )
 
+            # ================================================
+            # 최종 예측
+            # ================================================
+
             final_prediction = (
                 predicted_support
                 +
@@ -598,22 +629,69 @@ if run_prediction:
                 )
             )
 
-            final_prediction = np.clip(
-                final_prediction,
-                0,
-                100
+            # ================================================
+            # 표준오차 계산
+            # ================================================
+
+            avg_support = (
+                predicted_support / 100
             )
 
-            volatility = max(
-                1,
-                np.std(
-                    temp["support_kalman"]
+            n = max(
+                df["sample_size"].mean(),
+                1
+            )
+
+            support_se = np.sqrt(
+                (
+                    avg_support
+                    *
+                    (
+                        1 - avg_support
+                    )
+                ) / n
+            )
+
+            undecided_n = (
+                n
+                *
+                (
+                    predicted_undecided / 100
                 )
             )
 
+            undecided_n = max(
+                undecided_n,
+                1
+            )
+
+            avg_pref = (
+                predicted_pref / 100
+            )
+
+            undecided_se = np.sqrt(
+                (
+                    avg_pref
+                    *
+                    (
+                        1 - avg_pref
+                    )
+                ) / undecided_n
+            )
+
+            combined_se = np.sqrt(
+                support_se**2
+                +
+                undecided_se**2
+            )
+
+            # ================================================
+            # Monte Carlo
+            # ================================================
+
             simulations = np.random.normal(
                 final_prediction,
-                volatility,
+                combined_se * 100,
                 10000
             )
 
@@ -629,17 +707,23 @@ if run_prediction:
                 "simulations": simulations
             })
 
-            # 실선
+            # ================================================
+            # 현재 추세 실선
+            # ================================================
+
             fig.add_trace(
                 go.Scatter(
                     x=temp["end_date"],
                     y=temp["support_kalman"],
                     mode="lines+markers",
-                    name=f"{candidate} 현재 추세"
+                    name=f"{candidate} 추세"
                 )
             )
 
-            # 점선 미래 예측
+            # ================================================
+            # 미래 점선
+            # ================================================
+
             future_dates = pd.date_range(
                 start=temp["end_date"].max(),
                 end=pd.to_datetime(
@@ -650,7 +734,8 @@ if run_prediction:
 
             future_date_num = (
                 future_dates
-                - temp["end_date"].min()
+                -
+                temp["end_date"].min()
             ).days.values.reshape(-1, 1)
 
             future_predictions = (
@@ -673,12 +758,12 @@ if run_prediction:
                     line=dict(
                         dash="dash"
                     ),
-                    name=f"{candidate} 선거일까지 예측"
+                    name=f"{candidate} 미래 예측"
                 )
             )
 
         # =====================================================
-        # 최종 정규화
+        # 자동 정규화
         # =====================================================
 
         total_prediction = sum(
@@ -692,7 +777,8 @@ if run_prediction:
 
                 result["prediction"] = (
                     result["prediction"]
-                    / total_prediction
+                    /
+                    total_prediction
                 ) * 100
 
         # =====================================================
@@ -716,6 +802,18 @@ if run_prediction:
                     "simulations"
                 ][i]
 
+            # 정규화
+            total = sum(sample.values())
+
+            if total > 0:
+
+                for k in sample:
+
+                    sample[k] = (
+                        sample[k]
+                        / total
+                    ) * 100
+
             winner = max(
                 sample,
                 key=sample.get
@@ -724,8 +822,39 @@ if run_prediction:
             win_counts[winner] += 1
 
         # =====================================================
-        # 그래프 출력
+        # 그래프 범위 자동 조절
         # =====================================================
+
+        all_graph_values = []
+
+        for trace in fig.data:
+
+            all_graph_values.extend(
+                trace.y
+            )
+
+        y_max = (
+            max(all_graph_values)
+            + 5
+        )
+
+        y_max = min(
+            y_max,
+            100
+        )
+
+        y_max = max(
+            y_max,
+            20
+        )
+
+        fig.update_layout(
+            template="plotly_white",
+            yaxis=dict(
+                range=[0, y_max],
+                ticksuffix="%"
+            )
+        )
 
         st.plotly_chart(
             fig,
@@ -733,10 +862,10 @@ if run_prediction:
         )
 
         # =====================================================
-        # 최종 결과 출력
+        # 최종 결과
         # =====================================================
 
-        st.header("8. 선거일 예측 결과")
+        st.header("7. 선거일 예측 결과")
 
         result_rows = []
 
@@ -753,14 +882,10 @@ if run_prediction:
 
             result_rows.append({
                 "후보": candidate,
-                "예상 득표율": round(
-                    prediction,
-                    2
-                ),
-                "승률": round(
-                    win_rate,
-                    2
-                )
+                "예상 득표율":
+                    round(prediction, 2),
+                "승률":
+                    round(win_rate, 2)
             })
 
         result_df = pd.DataFrame(
@@ -778,10 +903,10 @@ if run_prediction:
         )
 
         # =====================================================
-        # 세부 계산 데이터
+        # 원본 데이터
         # =====================================================
 
-        st.header("9. 세부 계산 데이터")
+        st.header("8. 세부 데이터")
 
         st.dataframe(
             df,
