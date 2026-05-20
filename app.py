@@ -23,10 +23,11 @@ st.markdown("""
 
 - House Effect 제거
 - 표본수 가중치 반영
-- 무당층 추세 분석
+- Kalman Filter 추세 분석
+- 무당층 자동 계산
 - 무당층 선호 추세 분석
-- Kalman Filter
 - Monte Carlo 승률 계산
+- 선거일까지 미래 예측 점선 표시
 - 자동 득표율 정규화
 """)
 
@@ -52,11 +53,11 @@ candidate_count = st.slider(
 
 candidate_names = []
 
-candidate_cols = st.columns(candidate_count)
+cols = st.columns(candidate_count)
 
 for i in range(candidate_count):
 
-    with candidate_cols[i]:
+    with cols[i]:
 
         name = st.text_input(
             f"후보 {i+1} 이름",
@@ -84,14 +85,25 @@ election_day = st.date_input(
 )
 
 # =========================================================
-# Kalman Filter 설정
+# Kalman 설정
 # =========================================================
 
 st.header("3. Kalman Filter 설정")
 
-# R 설정
 R_option = st.select_slider(
     "R 값 (여론조사 신뢰도)",
+    options=[
+        "매우 낮음",
+        "낮음",
+        "보통",
+        "높음",
+        "매우 높음"
+    ],
+    value="보통"
+)
+
+Q_option = st.select_slider(
+    "Q 값 (민심 변화 민감도)",
     options=[
         "매우 낮음",
         "낮음",
@@ -110,21 +122,6 @@ R_map = {
     "매우 높음": 8.0
 }
 
-R_value = R_map[R_option]
-
-# Q 설정
-Q_option = st.select_slider(
-    "Q 값 (민심 변화 민감도)",
-    options=[
-        "매우 낮음",
-        "낮음",
-        "보통",
-        "높음",
-        "매우 높음"
-    ],
-    value="보통"
-)
-
 Q_map = {
     "매우 낮음": 0.01,
     "낮음": 0.03,
@@ -133,10 +130,11 @@ Q_map = {
     "매우 높음": 0.2
 }
 
+R_value = R_map[R_option]
 Q_value = Q_map[Q_option]
 
 st.info(f"""
-현재 Kalman 설정
+현재 설정
 
 R = {R_value}
 Q = {Q_value}
@@ -150,8 +148,6 @@ st.header("4. 여론조사 입력")
 
 with st.form("poll_form"):
 
-    st.subheader("새 여론조사")
-
     pollster = st.text_input(
         "조사기관"
     )
@@ -161,15 +157,13 @@ with st.form("poll_form"):
     with col1:
 
         start_date = st.date_input(
-            "조사 시작일",
-            key="start_date"
+            "조사 시작일"
         )
 
     with col2:
 
         end_date = st.date_input(
-            "조사 종료일",
-            key="end_date"
+            "조사 종료일"
         )
 
     sample_size = st.number_input(
@@ -178,27 +172,20 @@ with st.form("poll_form"):
         value=1000
     )
 
-    undecided_total = st.number_input(
-        "전체 무당층 (%)",
-        min_value=0.0,
-        max_value=100.0,
-        step=0.1
-    )
-
-    st.subheader("현재 후보 지지율")
+    st.subheader("후보 지지율")
 
     support_values = {}
 
-    support_cols = st.columns(
+    cols = st.columns(
         max(1, len(candidate_names))
     )
 
     for idx, candidate in enumerate(candidate_names):
 
-        with support_cols[idx]:
+        with cols[idx]:
 
             support = st.number_input(
-                f"{candidate} 현재 지지율 (%)",
+                f"{candidate} 지지율 (%)",
                 min_value=0.0,
                 max_value=100.0,
                 step=0.1,
@@ -207,17 +194,33 @@ with st.form("poll_form"):
 
             support_values[candidate] = support
 
+    # 무당층 자동 계산
+    undecided_total = (
+        100
+        - sum(support_values.values())
+    )
+
+    undecided_total = max(
+        0,
+        undecided_total
+    )
+
+    st.info(
+        f"자동 계산된 무당층: "
+        f"{round(undecided_total,2)}%"
+    )
+
     st.subheader("무당층 내부 후보 선호")
 
     undecided_preferences = {}
 
-    pref_cols = st.columns(
+    cols2 = st.columns(
         max(1, len(candidate_names))
     )
 
     for idx, candidate in enumerate(candidate_names):
 
-        with pref_cols[idx]:
+        with cols2[idx]:
 
             pref = st.number_input(
                 f"무당층 중 {candidate} 선호 (%)",
@@ -235,25 +238,14 @@ with st.form("poll_form"):
 
     if submit:
 
-        total_support = (
-            sum(support_values.values())
-            + undecided_total
-        )
-
         pref_total = sum(
             undecided_preferences.values()
         )
 
-        if total_support > 100:
+        if pollster.strip() == "":
 
             st.error("""
-후보 지지율 + 무당층 합계가 100 초과입니다.
-""")
-
-        elif pref_total > 100:
-
-            st.error("""
-무당층 후보 선호 합계가 100 초과입니다.
+조사기관 이름을 입력해주세요.
 """)
 
         elif end_date < start_date:
@@ -262,10 +254,16 @@ with st.form("poll_form"):
 조사 종료일이 시작일보다 빠릅니다.
 """)
 
-        elif pollster.strip() == "":
+        elif sum(support_values.values()) > 100:
 
             st.error("""
-조사기관 이름을 입력해주세요.
+후보 지지율 합계가 100 초과입니다.
+""")
+
+        elif pref_total > 100:
+
+            st.error("""
+무당층 내부 선호 합계가 100 초과입니다.
 """)
 
         else:
@@ -280,14 +278,16 @@ with st.form("poll_form"):
                 "undecided_preferences": undecided_preferences
             }
 
-            st.session_state.polls.append(poll)
+            st.session_state.polls.append(
+                poll
+            )
 
             st.success("""
 여론조사가 추가되었습니다.
 """)
 
 # =========================================================
-# 입력된 여론조사 출력
+# 입력된 조사 출력
 # =========================================================
 
 st.header("5. 입력된 여론조사")
@@ -300,7 +300,7 @@ if len(st.session_state.polls) == 0:
 
 else:
 
-    display_rows = []
+    rows = []
 
     for poll in st.session_state.polls:
 
@@ -319,9 +319,9 @@ else:
                 .get(candidate, 0)
             )
 
-        display_rows.append(row)
+        rows.append(row)
 
-    display_df = pd.DataFrame(display_rows)
+    display_df = pd.DataFrame(rows)
 
     display_df["종료일"] = pd.to_datetime(
         display_df["종료일"]
@@ -391,7 +391,6 @@ if run_prediction:
 
         df = pd.DataFrame(rows)
 
-        # 날짜 다양성 검사
         unique_dates = df["end_date"].nunique()
 
         if unique_dates < 2:
@@ -630,12 +629,51 @@ if run_prediction:
                 "simulations": simulations
             })
 
+            # 실선
             fig.add_trace(
                 go.Scatter(
                     x=temp["end_date"],
                     y=temp["support_kalman"],
                     mode="lines+markers",
-                    name=f"{candidate} 추세"
+                    name=f"{candidate} 현재 추세"
+                )
+            )
+
+            # 점선 미래 예측
+            future_dates = pd.date_range(
+                start=temp["end_date"].max(),
+                end=pd.to_datetime(
+                    election_day
+                ),
+                periods=30
+            )
+
+            future_date_num = (
+                future_dates
+                - temp["end_date"].min()
+            ).days.values.reshape(-1, 1)
+
+            future_predictions = (
+                support_model.predict(
+                    future_date_num
+                )
+            )
+
+            future_predictions = np.clip(
+                future_predictions,
+                0,
+                100
+            )
+
+            fig.add_trace(
+                go.Scatter(
+                    x=future_dates,
+                    y=future_predictions,
+                    mode="lines",
+                    line=dict(
+                        dash="dash"
+                    ),
+                    name=f"{candidate} 선거일까지 예측"
                 )
             )
 
