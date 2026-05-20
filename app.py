@@ -39,67 +39,221 @@ import json
 import os
 
 # =========================================================
-# 기본 설정
+# [추가 1] 뒤로가기용 페이지 상태
 # =========================================================
 
-st.set_page_config(
-    page_title="실전형 선거예측 시스템",
-    layout="wide"
-)
-
-SAVE_DIR = "saved_simulations"
-
-os.makedirs(
-    SAVE_DIR,
-    exist_ok=True
-)
+if "page" not in st.session_state:
+    st.session_state.page = "menu"
 
 # =========================================================
-# 타이틀
+# [추가 2] 메인 메뉴
 # =========================================================
 
-st.title("실전형 선거예측 시스템")
+if st.session_state.page == "menu":
 
-st.markdown("""
-### Ultimate Edition
+    st.title("실전형 선거예측 시스템")
 
-- House Effect 제거
-- 표본오차 기반 불확실성 추세
-- Time Decay
-- Kalman Filter
-- 무당층 독립 추세
-- Monte Carlo
-- 승률 계산
-- 신뢰구간
-- 미래 점선 예측
-""")
+    st.markdown("## 메인 메뉴")
 
-# =========================================================
-# 세션 상태
-# =========================================================
+    col1, col2 = st.columns(2)
 
-if "simulation_name" not in st.session_state:
-    st.session_state.simulation_name = ""
+    with col1:
 
-if "candidate_names" not in st.session_state:
-    st.session_state.candidate_names = []
+        if st.button("새 시뮬레이션"):
 
-if "polls" not in st.session_state:
-    st.session_state.polls = []
+            st.session_state.page = "new"
+
+            st.rerun()
+
+    with col2:
+
+        if st.button("저장된 시뮬레이션 불러오기"):
+
+            st.session_state.page = "load"
+
+            st.rerun()
+
+    st.stop()
 
 # =========================================================
-# 시뮬레이션 메뉴
+# [추가 3] 새 시뮬레이션 페이지
 # =========================================================
 
-st.header("1. 시뮬레이션")
+if st.session_state.page == "new":
 
-menu = st.radio(
-    "선택",
-    [
-        "새 시뮬레이션",
-        "불러오기"
+    st.title("새 시뮬레이션")
+
+    sim_name = st.text_input(
+        "시뮬레이션 이름"
+    )
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+
+        if st.button("생성"):
+
+            if sim_name.strip() == "":
+
+                st.error("이름 입력")
+
+            else:
+
+                st.session_state.simulation_name = sim_name
+
+                st.session_state.candidate_names = []
+
+                st.session_state.polls = []
+
+                st.session_state.page = "main"
+
+                st.rerun()
+
+    with col2:
+
+        if st.button("← 뒤로가기"):
+
+            st.session_state.page = "menu"
+
+            st.rerun()
+
+    st.stop()
+
+# =========================================================
+# [추가 4] 불러오기 페이지
+# =========================================================
+
+if st.session_state.page == "load":
+
+    st.title("시뮬레이션 불러오기")
+
+    saved_files = [
+
+        f.replace(".json","")
+
+        for f in os.listdir(SAVE_DIR)
+
+        if f.endswith(".json")
     ]
-)
+
+    if len(saved_files) == 0:
+
+        st.warning("저장된 시뮬레이션 없음")
+
+    else:
+
+        selected = st.selectbox(
+            "불러올 시뮬레이션",
+            saved_files
+        )
+
+        col1, col2, col3 = st.columns(3)
+
+        # =================================================
+        # 불러오기
+        # =================================================
+
+        with col1:
+
+            if st.button("불러오기"):
+
+                with open(
+                    f"{SAVE_DIR}/{selected}.json",
+                    "r",
+                    encoding="utf-8"
+                ) as f:
+
+                    data = json.load(f)
+
+                st.session_state.simulation_name = data["simulation_name"]
+
+                st.session_state.candidate_names = data["candidate_names"]
+
+                st.session_state.polls = data["polls"]
+
+                st.session_state.page = "main"
+
+                st.rerun()
+
+        # =================================================
+        # 삭제 기능
+        # =================================================
+
+        with col2:
+
+            if st.button("시뮬레이션 삭제"):
+
+                os.remove(
+                    f"{SAVE_DIR}/{selected}.json"
+                )
+
+                st.success("삭제 완료")
+
+                st.rerun()
+
+        # =================================================
+        # 뒤로가기
+        # =================================================
+
+        with col3:
+
+            if st.button("← 뒤로가기"):
+
+                st.session_state.page = "menu"
+
+                st.rerun()
+
+    st.stop()
+
+# =========================================================
+# [추가 5] 메인 시스템 페이지
+# =========================================================
+
+if st.session_state.page == "main":
+
+    st.title(
+        f"실전형 선거예측 시스템 "
+        f"- {st.session_state.simulation_name}"
+    )
+
+    # =====================================================
+    # 상단 네비게이션
+    # =====================================================
+
+    nav1, nav2 = st.columns(2)
+
+    with nav1:
+
+        if st.button("← 메인 메뉴"):
+
+            st.session_state.page = "menu"
+
+            st.rerun()
+
+    with nav2:
+
+        if st.button("현재 시뮬레이션 삭제"):
+
+            file_path = (
+                f"{SAVE_DIR}/"
+                f"{st.session_state.simulation_name}.json"
+            )
+
+            if os.path.exists(file_path):
+
+                os.remove(file_path)
+
+            st.session_state.simulation_name = ""
+
+            st.session_state.candidate_names = []
+
+            st.session_state.polls = []
+
+            st.session_state.page = "menu"
+
+            st.success("삭제 완료")
+
+            st.rerun()
 
 # =========================================================
 # 새 시뮬레이션
