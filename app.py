@@ -1120,3 +1120,212 @@ if st.session_state.page == "main":
             result_df,
             use_container_width=True
         )
+# =================================================
+# 그래프
+# =================================================
+
+st.header("9. 추세 그래프")
+
+fig = go.Figure()
+
+all_max = []
+
+for c in candidate_names:
+
+    temp = (
+        df.groupby("end_date")
+        .mean(numeric_only=True)
+        .reset_index()
+    )
+
+    temp = temp.sort_values("end_date")
+
+    dynamic_r = []
+
+    for idx, row in temp.iterrows():
+
+        p = row[f"{c}_adjusted"] / 100
+
+        n = max(row["sample_size"], 1)
+
+        se = np.sqrt((p * (1-p)) / n)
+
+        se = max(se, 0.0001)
+
+        r_value = ((se * 100)**2) * BASE_R
+
+        dynamic_r.append(r_value)
+
+    temp["dynamic_r"] = dynamic_r
+
+    kalman_values = run_kalman(
+        temp[f"{c}_adjusted"],
+        temp["dynamic_r"]
+    )
+
+    temp["kalman"] = kalman_values
+
+    temp["date_num"] = (
+        temp["end_date"]
+        -
+        temp["end_date"].min()
+    ).dt.days
+
+    X = temp[["date_num"]]
+
+    model = LinearRegression()
+
+    model.fit(
+        X,
+        temp["kalman"]
+    )
+
+    future_dates = pd.date_range(
+        start=temp["end_date"].min(),
+        end=pd.to_datetime(election_day),
+        freq="D"
+    )
+
+    future_num = (
+        future_dates
+        -
+        temp["end_date"].min()
+    ).days.values.reshape(-1,1)
+
+    preds = model.predict(future_num)
+
+    all_max.extend(preds)
+
+    # =============================
+    # 실제 데이터 점
+    # =============================
+
+    fig.add_trace(
+
+        go.Scatter(
+
+            x=temp["end_date"],
+
+            y=temp[f"{c}_adjusted"],
+
+            mode="markers",
+
+            name=f"{c} 실제조사"
+        )
+    )
+
+    # =============================
+    # Kalman 추세 실선
+    # =============================
+
+    fig.add_trace(
+
+        go.Scatter(
+
+            x=temp["end_date"],
+
+            y=temp["kalman"],
+
+            mode="lines",
+
+            name=f"{c} 추세"
+        )
+    )
+
+    # =============================
+    # 미래 예측 점선
+    # =============================
+
+    future_mask = (
+        future_dates
+        >
+        temp["end_date"].max()
+    )
+
+    fig.add_trace(
+
+        go.Scatter(
+
+            x=future_dates[future_mask],
+
+            y=preds[future_mask],
+
+            mode="lines",
+
+            line=dict(
+                dash="dash"
+            ),
+
+            name=f"{c} 미래예측"
+        )
+    )
+
+    # =============================
+    # 신뢰구간 밴드
+    # =============================
+
+    sims = np.array(
+        world_predictions[c]
+    )
+
+    spread = np.std(sims)
+
+    upper = preds + spread
+
+    lower = preds - spread
+
+    lower = np.clip(
+        lower,
+        0,
+        100
+    )
+
+    fig.add_trace(
+
+        go.Scatter(
+
+            x=list(future_dates)
+              +
+              list(future_dates[::-1]),
+
+            y=list(upper)
+              +
+              list(lower[::-1]),
+
+            fill="toself",
+
+            opacity=0.15,
+
+            line=dict(width=0),
+
+            showlegend=False
+        )
+    )
+
+# =================================================
+# Y축 자동 설정
+# =================================================
+
+max_y = max(all_max) + 5
+
+max_y = min(max_y, 100)
+
+fig.update_layout(
+
+    height=700,
+
+    yaxis=dict(
+        range=[0, max_y]
+    ),
+
+    xaxis_title="날짜",
+
+    yaxis_title="지지율 (%)",
+
+    hovermode="x unified"
+)
+
+st.plotly_chart(
+    fig,
+    use_container_width=True
+)
