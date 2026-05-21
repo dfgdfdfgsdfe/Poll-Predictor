@@ -19,7 +19,7 @@ import json
 # =========================================================
 
 st.set_page_config(
-    page_title="여론조사 추세 예측모델",
+    page_title="Ultimate Bayesian Election Predictor",
     layout="wide"
 )
 
