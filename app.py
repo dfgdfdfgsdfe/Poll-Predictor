@@ -1022,10 +1022,17 @@ if st.session_state.page == "main":
                 "all_sims": sims
             })
 
-        total = sum(
+        # =================================================
+        # 최종 정규화
+        # =================================================
+
+        total_prediction = sum(
             x["prediction"]
             for x in final_results
         )
+
+        if total_prediction <= 0:
+            total_prediction = 1
 
         for r in final_results:
 
@@ -1035,7 +1042,27 @@ if st.session_state.page == "main":
 
                 /
 
-                total
+                total_prediction
+
+            ) * 100
+
+            r["lower"] = (
+
+                r["lower"]
+
+                /
+
+                total_prediction
+
+            ) * 100
+
+            r["upper"] = (
+
+                r["upper"]
+
+                /
+
+                total_prediction
 
             ) * 100
 
