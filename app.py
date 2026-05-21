@@ -19,7 +19,7 @@ import json
 # =========================================================
 
 st.set_page_config(
-    page_title="Ultimate Bayesian Election Predictor",
+    page_title="여론조사 추세 예측모델",
     layout="wide"
 )
 
@@ -59,18 +59,6 @@ if st.session_state.page == "menu":
     st.title("Ultimate Bayesian Election Predictor")
 
     st.markdown("""
-    ## 기능
-
-    - Bayesian Poll Worlds
-    - Nested Monte Carlo
-    - House Effect 제거
-    - Time Decay
-    - Kalman Filter
-    - Dynamic R
-    - 무당층 독립 추세
-    - 미래 예측
-    - 승률 계산
-    - 신뢰구간 표시
     """)
 
     col1, col2 = st.columns(2)
