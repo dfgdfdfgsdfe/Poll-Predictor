@@ -1,6 +1,6 @@
 # =========================================================
-# 실전형 선거예측 시스템
-# Ultimate Bayesian Edition
+# Ultimate Bayesian Election Predictor
+# Full Production Version
 # =========================================================
 
 import streamlit as st
@@ -11,17 +11,21 @@ import plotly.graph_objects as go
 from sklearn.linear_model import LinearRegression
 from filterpy.kalman import KalmanFilter
 
-import json
 import os
+import json
 
 # =========================================================
-# 기본 설정
+# Streamlit 기본 설정
 # =========================================================
 
 st.set_page_config(
-    page_title="Ultimate Election Predictor",
+    page_title="Ultimate Bayesian Election Predictor",
     layout="wide"
 )
+
+# =========================================================
+# 저장 폴더
+# =========================================================
 
 SAVE_DIR = "saved_simulations"
 
@@ -47,7 +51,7 @@ if "polls" not in st.session_state:
     st.session_state.polls = []
 
 # =========================================================
-# 메뉴
+# 메인 메뉴
 # =========================================================
 
 if st.session_state.page == "menu":
@@ -57,15 +61,16 @@ if st.session_state.page == "menu":
     st.markdown("""
     ## 기능
 
-    - House Effect 제거
-    - Time Decay
-    - Dynamic R
-    - Kalman Filter
     - Bayesian Poll Worlds
     - Nested Monte Carlo
+    - House Effect 제거
+    - Time Decay
+    - Kalman Filter
+    - Dynamic R
     - 무당층 독립 추세
+    - 미래 예측
     - 승률 계산
-    - 미래 예측 점선
+    - 신뢰구간 표시
     """)
 
     col1, col2 = st.columns(2)
@@ -94,7 +99,7 @@ if st.session_state.page == "menu":
 
 if st.session_state.page == "new":
 
-    st.title("새 시뮬레이션")
+    st.title("새 시뮬레이션 생성")
 
     sim_name = st.text_input(
         "시뮬레이션 이름"
@@ -108,7 +113,7 @@ if st.session_state.page == "new":
 
             if sim_name.strip() == "":
 
-                st.error("이름 입력")
+                st.error("이름 입력 필요")
 
             else:
 
@@ -138,11 +143,11 @@ if st.session_state.page == "new":
 
 if st.session_state.page == "load":
 
-    st.title("불러오기")
+    st.title("시뮬레이션 불러오기")
 
     saved_files = [
 
-        f.replace(".json","")
+        f.replace(".json", "")
 
         for f in os.listdir(SAVE_DIR)
 
@@ -213,11 +218,11 @@ if st.session_state.page == "load":
 if st.session_state.page == "main":
 
     st.title(
-        f"{st.session_state.simulation_name}"
+        st.session_state.simulation_name
     )
 
     # =====================================================
-    # 메뉴
+    # 상단 메뉴
     # =====================================================
 
     nav1, nav2 = st.columns(2)
@@ -248,7 +253,7 @@ if st.session_state.page == "main":
             st.rerun()
 
     # =====================================================
-    # 후보
+    # 후보 설정
     # =====================================================
 
     st.header("1. 후보 설정")
@@ -304,7 +309,7 @@ if st.session_state.page == "main":
     )
 
     # =====================================================
-    # 설정
+    # 엔진 설정
     # =====================================================
 
     st.header("3. 엔진 설정")
@@ -358,7 +363,7 @@ if st.session_state.page == "main":
     )
 
     # =====================================================
-    # 매핑
+    # 설정 매핑
     # =====================================================
 
     R_MAP = {
@@ -512,7 +517,7 @@ if st.session_state.page == "main":
             st.success("추가 완료")
 
     # =====================================================
-    # 조사 목록
+    # 입력 조사 목록
     # =====================================================
 
     st.header("5. 입력된 조사")
@@ -524,13 +529,11 @@ if st.session_state.page == "main":
     ):
 
         with st.expander(
-            f"{poll['pollster']} "
-            f"| {poll['end_date']}"
+            f"{poll['pollster']} | {poll['end_date']}"
         ):
 
             st.write(
-                f"표본수: "
-                f"{poll['sample_size']}"
+                f"표본수: {poll['sample_size']}"
             )
 
             st.json(
@@ -593,10 +596,58 @@ if st.session_state.page == "main":
         st.success("저장 완료")
 
     # =====================================================
-    # 예측 실행
+    # Kalman 함수
     # =====================================================
 
-    st.header("7. 예측")
+    def run_kalman(values, r_values):
+
+        kf = KalmanFilter(
+            dim_x=2,
+            dim_z=1
+        )
+
+        kf.x = np.array([
+            values.iloc[0],
+            0
+        ])
+
+        kf.F = np.array([
+            [1,1],
+            [0,1]
+        ])
+
+        kf.H = np.array([
+            [1,0]
+        ])
+
+        kf.P *= 1000
+
+        kf.Q = np.array([
+            [Q_VALUE,0],
+            [0,Q_VALUE]
+        ])
+
+        filtered = []
+
+        for idx, value in enumerate(values):
+
+            kf.R = r_values.iloc[idx]
+
+            kf.predict()
+
+            kf.update(value)
+
+            filtered.append(
+                float(kf.x[0])
+            )
+
+        return filtered
+
+    # =====================================================
+    # 실행
+    # =====================================================
+
+    st.header("7. 예측 실행")
 
     RUN = st.button(
         "Ultimate Bayesian Simulation 실행"
@@ -709,54 +760,6 @@ if st.session_state.page == "main":
                     house_effect
                 )
             )
-
-        # =================================================
-        # Kalman
-        # =================================================
-
-        def run_kalman(values, r_values):
-
-            kf = KalmanFilter(
-                dim_x=2,
-                dim_z=1
-            )
-
-            kf.x = np.array([
-                values.iloc[0],
-                0
-            ])
-
-            kf.F = np.array([
-                [1,1],
-                [0,1]
-            ])
-
-            kf.H = np.array([
-                [1,0]
-            ])
-
-            kf.P *= 1000
-
-            kf.Q = np.array([
-                [Q_VALUE,0],
-                [0,Q_VALUE]
-            ])
-
-            filtered = []
-
-            for idx, value in enumerate(values):
-
-                kf.R = r_values.iloc[idx]
-
-                kf.predict()
-
-                kf.update(value)
-
-                filtered.append(
-                    float(kf.x[0])
-                )
-
-            return filtered
 
         # =================================================
         # Bayesian Worlds
@@ -989,7 +992,7 @@ if st.session_state.page == "main":
             )
 
         # =================================================
-        # 평균 계산
+        # 최종 결과
         # =================================================
 
         final_results = []
@@ -1037,7 +1040,7 @@ if st.session_state.page == "main":
             ) * 100
 
         # =================================================
-        # 승률
+        # 승률 계산
         # =================================================
 
         win_counts = {
@@ -1077,7 +1080,7 @@ if st.session_state.page == "main":
 
         st.header("8. 결과")
 
-        rows = []
+        result_rows = []
 
         for r in final_results:
 
@@ -1091,7 +1094,7 @@ if st.session_state.page == "main":
 
             ) * 100
 
-            rows.append({
+            result_rows.append({
 
                 "후보":
                     r["candidate"],
@@ -1109,7 +1112,9 @@ if st.session_state.page == "main":
                     round(r["upper"],2)
             })
 
-        result_df = pd.DataFrame(rows)
+        result_df = pd.DataFrame(
+            result_rows
+        )
 
         result_df = result_df.sort_values(
             "예상 득표율",
@@ -1120,212 +1125,227 @@ if st.session_state.page == "main":
             result_df,
             use_container_width=True
         )
-# =================================================
-# 그래프
-# =================================================
 
-st.header("9. 추세 그래프")
+        # =================================================
+        # 그래프
+        # =================================================
 
-fig = go.Figure()
+        st.header("9. 추세 그래프")
 
-all_max = []
+        fig = go.Figure()
 
-for c in candidate_names:
+        all_max = []
 
-    temp = (
-        df.groupby("end_date")
-        .mean(numeric_only=True)
-        .reset_index()
-    )
+        for c in candidate_names:
 
-    temp = temp.sort_values("end_date")
+            temp = (
+                df.groupby("end_date")
+                .mean(numeric_only=True)
+                .reset_index()
+            )
 
-    dynamic_r = []
+            temp = temp.sort_values(
+                "end_date"
+            )
 
-    for idx, row in temp.iterrows():
+            dynamic_r = []
 
-        p = row[f"{c}_adjusted"] / 100
+            for idx, row in temp.iterrows():
 
-        n = max(row["sample_size"], 1)
+                p = row[f"{c}_adjusted"] / 100
 
-        se = np.sqrt((p * (1-p)) / n)
+                n = max(
+                    row["sample_size"],
+                    1
+                )
 
-        se = max(se, 0.0001)
+                se = np.sqrt(
+                    (p * (1-p)) / n
+                )
 
-        r_value = ((se * 100)**2) * BASE_R
+                se = max(
+                    se,
+                    0.0001
+                )
 
-        dynamic_r.append(r_value)
+                r_value = (
+                    (se * 100)**2
+                ) * BASE_R
 
-    temp["dynamic_r"] = dynamic_r
+                dynamic_r.append(
+                    r_value
+                )
 
-    kalman_values = run_kalman(
-        temp[f"{c}_adjusted"],
-        temp["dynamic_r"]
-    )
+            temp["dynamic_r"] = dynamic_r
 
-    temp["kalman"] = kalman_values
+            temp["kalman"] = run_kalman(
+                temp[f"{c}_adjusted"],
+                temp["dynamic_r"]
+            )
 
-    temp["date_num"] = (
-        temp["end_date"]
-        -
-        temp["end_date"].min()
-    ).dt.days
+            temp["date_num"] = (
 
-    X = temp[["date_num"]]
+                temp["end_date"]
 
-    model = LinearRegression()
+                -
 
-    model.fit(
-        X,
-        temp["kalman"]
-    )
+                temp["end_date"].min()
 
-    future_dates = pd.date_range(
-        start=temp["end_date"].min(),
-        end=pd.to_datetime(election_day),
-        freq="D"
-    )
+            ).dt.days
 
-    future_num = (
-        future_dates
-        -
-        temp["end_date"].min()
-    ).days.values.reshape(-1,1)
+            X = temp[["date_num"]]
 
-    preds = model.predict(future_num)
+            model = LinearRegression()
 
-    all_max.extend(preds)
+            model.fit(
+                X,
+                temp["kalman"]
+            )
 
-    # =============================
-    # 실제 데이터 점
-    # =============================
+            future_dates = pd.date_range(
+                start=temp["end_date"].min(),
+                end=pd.to_datetime(election_day),
+                freq="D"
+            )
 
-    fig.add_trace(
+            future_num = (
 
-        go.Scatter(
+                future_dates
 
-            x=temp["end_date"],
+                -
 
-            y=temp[f"{c}_adjusted"],
+                temp["end_date"].min()
 
-            mode="markers",
+            ).days.values.reshape(-1,1)
 
-            name=f"{c} 실제조사"
+            preds = model.predict(
+                future_num
+            )
+
+            all_max.extend(preds)
+
+            # 실제 조사점
+
+            fig.add_trace(
+
+                go.Scatter(
+
+                    x=temp["end_date"],
+
+                    y=temp[f"{c}_adjusted"],
+
+                    mode="markers",
+
+                    name=f"{c} 실제조사"
+                )
+            )
+
+            # Kalman 추세선
+
+            fig.add_trace(
+
+                go.Scatter(
+
+                    x=temp["end_date"],
+
+                    y=temp["kalman"],
+
+                    mode="lines",
+
+                    name=f"{c} 추세"
+                )
+            )
+
+            # 미래 예측 점선
+
+            future_mask = (
+
+                future_dates
+                >
+                temp["end_date"].max()
+            )
+
+            fig.add_trace(
+
+                go.Scatter(
+
+                    x=future_dates[future_mask],
+
+                    y=preds[future_mask],
+
+                    mode="lines",
+
+                    line=dict(
+                        dash="dash"
+                    ),
+
+                    name=f"{c} 미래예측"
+                )
+            )
+
+            # 신뢰구간
+
+            sims = np.array(
+                world_predictions[c]
+            )
+
+            spread = np.std(sims)
+
+            upper = preds + spread
+
+            lower = preds - spread
+
+            lower = np.clip(
+                lower,
+                0,
+                100
+            )
+
+            fig.add_trace(
+
+                go.Scatter(
+
+                    x=list(future_dates)
+                    +
+                    list(future_dates[::-1]),
+
+                    y=list(upper)
+                    +
+                    list(lower[::-1]),
+
+                    fill="toself",
+
+                    opacity=0.15,
+
+                    line=dict(width=0),
+
+                    showlegend=False
+                )
+            )
+
+        max_y = max(all_max) + 5
+
+        max_y = min(
+            max_y,
+            100
         )
-    )
 
-    # =============================
-    # Kalman 추세 실선
-    # =============================
+        fig.update_layout(
 
-    fig.add_trace(
+            height=700,
 
-        go.Scatter(
-
-            x=temp["end_date"],
-
-            y=temp["kalman"],
-
-            mode="lines",
-
-            name=f"{c} 추세"
-        )
-    )
-
-    # =============================
-    # 미래 예측 점선
-    # =============================
-
-    future_mask = (
-        future_dates
-        >
-        temp["end_date"].max()
-    )
-
-    fig.add_trace(
-
-        go.Scatter(
-
-            x=future_dates[future_mask],
-
-            y=preds[future_mask],
-
-            mode="lines",
-
-            line=dict(
-                dash="dash"
+            yaxis=dict(
+                range=[0, max_y]
             ),
 
-            name=f"{c} 미래예측"
+            xaxis_title="날짜",
+
+            yaxis_title="지지율 (%)",
+
+            hovermode="x unified"
         )
-    )
 
-    # =============================
-    # 신뢰구간 밴드
-    # =============================
-
-    sims = np.array(
-        world_predictions[c]
-    )
-
-    spread = np.std(sims)
-
-    upper = preds + spread
-
-    lower = preds - spread
-
-    lower = np.clip(
-        lower,
-        0,
-        100
-    )
-
-    fig.add_trace(
-
-        go.Scatter(
-
-            x=list(future_dates)
-              +
-              list(future_dates[::-1]),
-
-            y=list(upper)
-              +
-              list(lower[::-1]),
-
-            fill="toself",
-
-            opacity=0.15,
-
-            line=dict(width=0),
-
-            showlegend=False
+        st.plotly_chart(
+            fig,
+            use_container_width=True
         )
-    )
-
-# =================================================
-# Y축 자동 설정
-# =================================================
-
-max_y = max(all_max) + 5
-
-max_y = min(max_y, 100)
-
-fig.update_layout(
-
-    height=700,
-
-    yaxis=dict(
-        range=[0, max_y]
-    ),
-
-    xaxis_title="날짜",
-
-    yaxis_title="지지율 (%)",
-
-    hovermode="x unified"
-)
-
-st.plotly_chart(
-    fig,
-    use_container_width=True
-)
