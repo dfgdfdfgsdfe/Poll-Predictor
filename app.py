@@ -1,1366 +1,745 @@
 # =========================================================
-# Ultimate Bayesian Election Predictor
-# Full Production Version
+# ULTIMATE ADAPTIVE BAYESIAN ELECTION PREDICTOR
+# FiveThirtyEight Style Edition
+# Streamlit Full Version
 # =========================================================
 
 import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-
 from sklearn.linear_model import LinearRegression
-from filterpy.kalman import KalmanFilter
-
-import os
+from pykalman import KalmanFilter
+from datetime import datetime, timedelta
 import json
+import os
 
 # =========================================================
-# Streamlit 기본 설정
+# PAGE
 # =========================================================
 
 st.set_page_config(
-    page_title="Ultimate Bayesian Election Predictor",
+    page_title="Adaptive Bayesian Election Predictor",
     layout="wide"
 )
 
+st.title("Adaptive Bayesian Election Predictor")
+
 # =========================================================
-# 저장 폴더
+# SAVE SYSTEM
 # =========================================================
 
 SAVE_DIR = "saved_simulations"
 
-os.makedirs(
-    SAVE_DIR,
-    exist_ok=True
+os.makedirs(SAVE_DIR, exist_ok=True)
+
+# =========================================================
+# MENU
+# =========================================================
+
+menu = st.sidebar.radio(
+    "메뉴",
+    [
+        "새 시뮬레이션",
+        "불러오기"
+    ]
 )
 
 # =========================================================
-# 세션 상태
+# LOAD
 # =========================================================
 
-if "page" not in st.session_state:
-    st.session_state.page = "menu"
+saved_files = [
+    f.replace(".json", "")
+    for f in os.listdir(SAVE_DIR)
+    if f.endswith(".json")
+]
 
-if "simulation_name" not in st.session_state:
-    st.session_state.simulation_name = ""
+loaded_data = None
 
-if "candidate_names" not in st.session_state:
-    st.session_state.candidate_names = []
-
-if "polls" not in st.session_state:
-    st.session_state.polls = []
-
-# =========================================================
-# 메인 메뉴
-# =========================================================
-
-if st.session_state.page == "menu":
-
-    st.title("Ultimate Bayesian Election Predictor")
-
-    st.markdown("""
-    """)
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-
-        if st.button("새 시뮬레이션"):
-
-            st.session_state.page = "new"
-
-            st.rerun()
-
-    with col2:
-
-        if st.button("불러오기"):
-
-            st.session_state.page = "load"
-
-            st.rerun()
-
-    st.stop()
-
-# =========================================================
-# 새 시뮬레이션
-# =========================================================
-
-if st.session_state.page == "new":
-
-    st.title("새 시뮬레이션 생성")
-
-    sim_name = st.text_input(
-        "시뮬레이션 이름"
-    )
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-
-        if st.button("생성"):
-
-            if sim_name.strip() == "":
-
-                st.error("이름 입력 필요")
-
-            else:
-
-                st.session_state.simulation_name = sim_name
-
-                st.session_state.candidate_names = []
-
-                st.session_state.polls = []
-
-                st.session_state.page = "main"
-
-                st.rerun()
-
-    with col2:
-
-        if st.button("← 뒤로가기"):
-
-            st.session_state.page = "menu"
-
-            st.rerun()
-
-    st.stop()
-
-# =========================================================
-# 불러오기
-# =========================================================
-
-if st.session_state.page == "load":
-
-    st.title("시뮬레이션 불러오기")
-
-    saved_files = [
-
-        f.replace(".json", "")
-
-        for f in os.listdir(SAVE_DIR)
-
-        if f.endswith(".json")
-    ]
+if menu == "불러오기":
 
     if len(saved_files) == 0:
 
         st.warning("저장된 시뮬레이션 없음")
+        st.stop()
 
-    else:
+    selected_file = st.sidebar.selectbox(
+        "시뮬레이션 선택",
+        saved_files
+    )
 
-        selected = st.selectbox(
-            "선택",
-            saved_files
+    with open(
+        f"{SAVE_DIR}/{selected_file}.json",
+        "r",
+        encoding="utf-8"
+    ) as f:
+
+        loaded_data = json.load(f)
+
+# =========================================================
+# SESSION
+# =========================================================
+
+if "polls" not in st.session_state:
+    st.session_state.polls = []
+
+if "candidates" not in st.session_state:
+    st.session_state.candidates = []
+
+# =========================================================
+# LOAD DATA
+# =========================================================
+
+if loaded_data:
+
+    st.session_state.polls = loaded_data["polls"]
+    st.session_state.candidates = loaded_data["candidates"]
+
+# =========================================================
+# SIDEBAR
+# =========================================================
+
+st.sidebar.header("후보 설정")
+
+candidate_input = st.sidebar.text_input(
+    "후보 이름"
+)
+
+if st.sidebar.button("후보 추가"):
+
+    if candidate_input.strip():
+
+        st.session_state.candidates.append(
+            candidate_input.strip()
         )
 
-        col1, col2, col3 = st.columns(3)
+# =========================================================
+# DELETE SIMULATION
+# =========================================================
 
-        with col1:
+if loaded_data:
 
-            if st.button("불러오기"):
+    if st.sidebar.button("시뮬레이션 삭제"):
 
-                with open(
-                    f"{SAVE_DIR}/{selected}.json",
-                    "r",
-                    encoding="utf-8"
-                ) as f:
+        os.remove(
+            f"{SAVE_DIR}/{selected_file}.json"
+        )
 
-                    data = json.load(f)
+        st.success("삭제 완료")
+        st.stop()
 
-                st.session_state.simulation_name = data["simulation_name"]
+# =========================================================
+# CANDIDATES
+# =========================================================
 
-                st.session_state.candidate_names = data["candidate_names"]
+candidates = st.session_state.candidates
 
-                st.session_state.polls = data["polls"]
+if len(candidates) == 0:
 
-                st.session_state.page = "main"
-
-                st.rerun()
-
-        with col2:
-
-            if st.button("삭제"):
-
-                os.remove(
-                    f"{SAVE_DIR}/{selected}.json"
-                )
-
-                st.success("삭제 완료")
-
-                st.rerun()
-
-        with col3:
-
-            if st.button("← 뒤로가기"):
-
-                st.session_state.page = "menu"
-
-                st.rerun()
-
+    st.info("후보를 추가하세요.")
     st.stop()
 
+st.write("후보:", candidates)
+
 # =========================================================
-# 메인
+# POLL INPUT
 # =========================================================
 
-if st.session_state.page == "main":
+st.header("여론조사 추가")
 
-    st.title(
-        st.session_state.simulation_name
+pollster = st.text_input("조사기관")
+
+col1, col2 = st.columns(2)
+
+with col1:
+    start_date = st.date_input("시작일")
+
+with col2:
+    end_date = st.date_input("종료일")
+
+sample_size = st.number_input(
+    "표본 수",
+    min_value=1,
+    value=1000
+)
+
+support_data = {}
+pref_data = {}
+
+st.subheader("후보 지지율")
+
+for c in candidates:
+
+    support_data[c] = st.number_input(
+        f"{c} 지지율",
+        min_value=0.0,
+        max_value=100.0,
+        value=0.0,
+        key=f"support_{c}"
     )
 
-    # =====================================================
-    # 상단 메뉴
-    # =====================================================
+st.subheader("무당층 내부 선호")
 
-    nav1, nav2 = st.columns(2)
+for c in candidates:
 
-    with nav1:
-
-        if st.button("← 메인 메뉴"):
-
-            st.session_state.page = "menu"
-
-            st.rerun()
-
-    with nav2:
-
-        if st.button("현재 시뮬레이션 삭제"):
-
-            path = (
-                f"{SAVE_DIR}/"
-                f"{st.session_state.simulation_name}.json"
-            )
-
-            if os.path.exists(path):
-
-                os.remove(path)
-
-            st.session_state.page = "menu"
-
-            st.rerun()
-
-    # =====================================================
-    # 후보 설정
-    # =====================================================
-
-    st.header("1. 후보 설정")
-
-    candidate_count = st.slider(
-        "후보 수",
-        1,
-        5,
-        max(
-            2,
-            len(st.session_state.candidate_names)
-        )
+    pref_data[c] = st.number_input(
+        f"{c} 무당층 선호",
+        min_value=0.0,
+        max_value=100.0,
+        value=0.0,
+        key=f"pref_{c}"
     )
 
-    candidate_names = []
+# =========================================================
+# ADD POLL
+# =========================================================
 
-    cols = st.columns(candidate_count)
+if st.button("여론조사 추가"):
 
-    for i in range(candidate_count):
-
-        default_name = ""
-
-        if i < len(st.session_state.candidate_names):
-
-            default_name = (
-                st.session_state.candidate_names[i]
-            )
-
-        with cols[i]:
-
-            name = st.text_input(
-                f"후보 {i+1}",
-                value=default_name,
-                key=f"candidate_{i}"
-            )
-
-            if name.strip() != "":
-
-                candidate_names.append(
-                    name.strip()
-                )
-
-    st.session_state.candidate_names = candidate_names
-
-    # =====================================================
-    # 선거일
-    # =====================================================
-
-    st.header("2. 선거일")
-
-    election_day = st.date_input(
-        "선거일"
+    total_support = sum(
+        support_data.values()
     )
 
-    # =====================================================
-    # 엔진 설정
-    # =====================================================
-
-    st.header("3. 엔진 설정")
-
-    trust_level = st.select_slider(
-        "여론조사 신뢰도",
-        options=[
-            "매우 낮음",
-            "낮음",
-            "보통",
-            "높음",
-            "매우 높음"
-        ],
-        value="보통"
+    undecided = max(
+        0,
+        100 - total_support
     )
 
-    trend_sensitivity = st.select_slider(
-        "민심 변화 민감도",
-        options=[
-            "매우 낮음",
-            "낮음",
-            "보통",
-            "높음",
-            "매우 높음"
-        ],
-        value="보통"
-    )
-
-    time_decay_strength = st.select_slider(
-        "최신 조사 반영도",
-        options=[
-            "매우 낮음",
-            "낮음",
-            "보통",
-            "높음",
-            "매우 높음"
-        ],
-        value="높음"
-    )
-
-    world_count = st.select_slider(
-        "Bayesian World 수",
-        options=[
-            100,
-            500,
-            1000,
-            3000,
-            5000
-        ],
-        value=1000
-    )
-
-    # =====================================================
-    # 설정 매핑
-    # =====================================================
-
-    R_MAP = {
-
-        "매우 낮음": 8.0,
-        "낮음": 4.0,
-        "보통": 2.0,
-        "높음": 1.0,
-        "매우 높음": 0.5
+    poll = {
+        "pollster": pollster,
+        "start_date": str(start_date),
+        "end_date": str(end_date),
+        "sample_size": sample_size,
+        "undecided": undecided
     }
 
-    Q_MAP = {
+    for c in candidates:
 
-        "매우 낮음": 0.01,
-        "낮음": 0.03,
-        "보통": 0.05,
-        "높음": 0.1,
-        "매우 높음": 0.2
-    }
+        poll[c] = support_data[c]
+        poll[f"{c}_pref"] = pref_data[c]
 
-    DECAY_MAP = {
+    st.session_state.polls.append(poll)
 
-        "매우 낮음": 0.003,
-        "낮음": 0.007,
-        "보통": 0.015,
-        "높음": 0.03,
-        "매우 높음": 0.05
-    }
+# =========================================================
+# POLL TABLE
+# =========================================================
 
-    BASE_R = R_MAP[trust_level]
+polls = st.session_state.polls
 
-    Q_VALUE = Q_MAP[trend_sensitivity]
+if len(polls) > 0:
 
-    LAMBDA = DECAY_MAP[time_decay_strength]
+    st.header("여론조사 목록")
 
-    # =====================================================
-    # 여론조사 입력
-    # =====================================================
+    df_display = pd.DataFrame(polls)
 
-    st.header("4. 여론조사 입력")
+    st.dataframe(df_display)
 
-    with st.form("poll_form"):
+    delete_idx = st.number_input(
+        "삭제할 조사 번호",
+        min_value=0,
+        max_value=len(polls)-1,
+        value=0
+    )
 
-        pollster = st.text_input(
-            "조사기관"
-        )
+    if st.button("조사 삭제"):
 
-        col1, col2 = st.columns(2)
-
-        with col1:
-
-            start_date = st.date_input(
-                "조사 시작일"
-            )
-
-        with col2:
-
-            end_date = st.date_input(
-                "조사 종료일"
-            )
-
-        sample_size = st.number_input(
-            "표본 수",
-            min_value=1,
-            value=1000
-        )
-
-        st.subheader("후보 지지율")
-
-        supports = {}
-
-        cols = st.columns(
-            max(1, len(candidate_names))
-        )
-
-        for idx, c in enumerate(candidate_names):
-
-            with cols[idx]:
-
-                val = st.number_input(
-                    f"{c} (%)",
-                    min_value=0.0,
-                    max_value=100.0,
-                    step=0.1,
-                    key=f"support_{c}"
-                )
-
-                supports[c] = val
-
-        undecided = (
-            100
-            -
-            sum(supports.values())
-        )
-
-        undecided = max(
-            undecided,
-            0
-        )
-
-        st.info(
-            f"자동 계산 무당층: "
-            f"{round(undecided,2)}%"
-        )
-
-        st.subheader("무당층 내부 선호")
-
-        undecided_pref = {}
-
-        cols2 = st.columns(
-            max(1, len(candidate_names))
-        )
-
-        for idx, c in enumerate(candidate_names):
-
-            with cols2[idx]:
-
-                pref = st.number_input(
-                    f"{c} 선호 (%)",
-                    min_value=0.0,
-                    max_value=100.0,
-                    step=0.1,
-                    key=f"pref_{c}"
-                )
-
-                undecided_pref[c] = pref
-
-        add_poll = st.form_submit_button(
-            "여론조사 추가"
-        )
-
-        if add_poll:
-
-            st.session_state.polls.append({
-
-                "pollster": pollster,
-
-                "start_date": str(start_date),
-
-                "end_date": str(end_date),
-
-                "sample_size": sample_size,
-
-                "supports": supports,
-
-                "undecided": undecided,
-
-                "undecided_pref": undecided_pref
-            })
-
-            st.success("추가 완료")
-
-    # =====================================================
-    # 입력 조사 목록
-    # =====================================================
-
-    st.header("5. 입력된 조사")
-
-    delete_index = None
-
-    for idx, poll in enumerate(
-        st.session_state.polls
-    ):
-
-        with st.expander(
-            f"{poll['pollster']} | {poll['end_date']}"
-        ):
-
-            st.write(
-                f"표본수: {poll['sample_size']}"
-            )
-
-            st.json(
-                poll["supports"]
-            )
-
-            st.json(
-                poll["undecided_pref"]
-            )
-
-            if st.button(
-                f"삭제 {idx}",
-                key=f"delete_{idx}"
-            ):
-
-                delete_index = idx
-
-    if delete_index is not None:
-
-        st.session_state.polls.pop(
-            delete_index
-        )
+        st.session_state.polls.pop(delete_idx)
 
         st.rerun()
 
-    # =====================================================
-    # 저장
-    # =====================================================
+# =========================================================
+# SAVE
+# =========================================================
 
-    st.header("6. 저장")
+st.header("저장")
 
-    if st.button("시뮬레이션 저장"):
+save_name = st.text_input(
+    "시뮬레이션 이름"
+)
 
-        data = {
+if st.button("저장"):
 
-            "simulation_name":
-                st.session_state.simulation_name,
+    save_data = {
+        "candidates": candidates,
+        "polls": polls
+    }
 
-            "candidate_names":
-                st.session_state.candidate_names,
+    with open(
+        f"{SAVE_DIR}/{save_name}.json",
+        "w",
+        encoding="utf-8"
+    ) as f:
 
-            "polls":
-                st.session_state.polls
-        }
-
-        with open(
-            f"{SAVE_DIR}/"
-            f"{st.session_state.simulation_name}.json",
-            "w",
-            encoding="utf-8"
-        ) as f:
-
-            json.dump(
-                data,
-                f,
-                ensure_ascii=False,
-                indent=4
-            )
-
-        st.success("저장 완료")
-
-    # =====================================================
-    # Kalman 함수
-    # =====================================================
-
-    def run_kalman(values, r_values):
-
-        kf = KalmanFilter(
-            dim_x=2,
-            dim_z=1
+        json.dump(
+            save_data,
+            f,
+            ensure_ascii=False,
+            indent=4
         )
 
-        kf.x = np.array([
-            values.iloc[0],
-            0
-        ])
+    st.success("저장 완료")
 
-        kf.F = np.array([
-            [1,1],
-            [0,1]
-        ])
+# =========================================================
+# FUNCTIONS
+# =========================================================
 
-        kf.H = np.array([
-            [1,0]
-        ])
+def calculate_se(p, n):
 
-        kf.P *= 1000
+    p = p / 100
 
-        kf.Q = np.array([
-            [Q_VALUE,0],
-            [0,Q_VALUE]
-        ])
+    return np.sqrt(
+        max(
+            p * (1-p) / n,
+            1e-6
+        )
+    ) * 100
 
-        filtered = []
+# =========================================================
+# AUTO R/Q
+# =========================================================
 
-        for idx, value in enumerate(values):
+def calculate_auto_r_q(df, candidate):
 
-            kf.R = r_values.iloc[idx]
-
-            kf.predict()
-
-            kf.update(value)
-
-            filtered.append(
-                float(kf.x[0])
-            )
-
-        return filtered
-
-    # =====================================================
-    # 실행
-    # =====================================================
-
-    st.header("7. 예측 실행")
-
-    RUN = st.button(
-        "Ultimate Bayesian Simulation 실행"
+    candidate_df = df.sort_values(
+        "end_date"
     )
 
-    if RUN:
+    values = candidate_df[candidate].values
 
-        if len(st.session_state.polls) < 2:
+    if len(values) < 2:
 
-            st.error("최소 2개 조사 필요")
+        return 2.0, 1.0
 
-            st.stop()
+    std = np.std(values)
 
-        rows = []
+    R = 1 + (std / 2)
 
-        for poll in st.session_state.polls:
+    R = np.clip(R, 0.5, 8)
 
-            row = {
+    first = values[0]
+    last = values[-1]
 
-                "pollster": poll["pollster"],
+    dates = pd.to_datetime(
+        candidate_df["end_date"]
+    )
 
-                "end_date": pd.to_datetime(
-                    poll["end_date"]
-                ),
-
-                "sample_size": poll["sample_size"],
-
-                "undecided": poll["undecided"]
-            }
-
-            for c in candidate_names:
-
-                row[c] = poll["supports"][c]
-
-                row[f"{c}_pref"] = (
-
-                    poll["undecided_pref"][c]
-                )
-
-            rows.append(row)
-
-        df = pd.DataFrame(rows)
-
-        df = df.sort_values(
-            "end_date"
-        )
-
-        latest_date = df["end_date"].max()
-
-        df["days_old"] = (
-
-            latest_date
+    days = max(
+        (
+            dates.iloc[-1]
             -
-            df["end_date"]
+            dates.iloc[0]
+        ).days,
+        1
+    )
 
-        ).dt.days
+    slope = abs(last - first) / days
 
-        df["time_weight"] = np.exp(
-            -LAMBDA * df["days_old"]
+    Q = 0.5 + slope * 5
+
+    Q = np.clip(Q, 0.1, 5)
+
+    return R, Q
+
+# =========================================================
+# SIMULATION
+# =========================================================
+
+if st.button("예측 실행"):
+
+    if len(polls) < 2:
+
+        st.warning("여론조사 2개 이상 필요")
+        st.stop()
+
+    df = pd.DataFrame(polls)
+
+    df["end_date"] = pd.to_datetime(
+        df["end_date"]
+    )
+
+    df = df.sort_values("end_date")
+
+    election_day = (
+        df["end_date"].max()
+        +
+        timedelta(days=14)
+    )
+
+    NUM_SIMULATIONS = 100
+
+    final_results = {
+        c: []
+        for c in candidates
+    }
+
+    win_counts = {
+        c: 0
+        for c in candidates
+    }
+
+    world_results = []
+
+    trend_fig = go.Figure()
+
+    # =====================================================
+    # TREND GRAPH
+    # =====================================================
+
+    for c in candidates:
+
+        kf = KalmanFilter(
+            initial_state_mean=df[c].iloc[0],
+            n_dim_obs=1
         )
 
-        # =================================================
-        # House Effect 제거
-        # =================================================
+        state_means, _ = kf.filter(
+            df[c].values
+        )
 
-        for c in candidate_names:
+        trend = state_means.flatten()
 
-            overall_mean = np.average(
-                df[c],
-                weights=(
-                    df["sample_size"]
-                    *
-                    df["time_weight"]
-                )
+        x = np.arange(len(trend))
+
+        model = LinearRegression()
+
+        model.fit(
+            x.reshape(-1,1),
+            trend
+        )
+
+        future_days = (
+            election_day
+            -
+            df["end_date"].max()
+        ).days
+
+        future_x = np.arange(
+            len(trend),
+            len(trend)+future_days
+        )
+
+        future_trend = model.predict(
+            future_x.reshape(-1,1)
+        )
+
+        trend_fig.add_trace(
+            go.Scatter(
+                x=df["end_date"],
+                y=trend,
+                mode="lines",
+                name=f"{c} 현재추세"
             )
+        )
 
-            pollster_mean = (
+        future_dates = pd.date_range(
+            start=df["end_date"].max(),
+            periods=future_days,
+            freq="D"
+        )
 
-                df.groupby("pollster")
-
-                .apply(
-
-                    lambda x:
-
-                    np.average(
-
-                        x[c],
-
-                        weights=(
-                            x["sample_size"]
-                            *
-                            x["time_weight"]
-                        )
-                    )
-                )
+        trend_fig.add_trace(
+            go.Scatter(
+                x=future_dates,
+                y=future_trend,
+                mode="lines",
+                line=dict(dash="dash"),
+                name=f"{c} 미래예측"
             )
+        )
 
-            house_effect = (
-                pollster_mean
-                - overall_mean
-            )
+    trend_fig.update_layout(
+        title="지지율 추세",
+        yaxis=dict(
+            range=[
+                0,
+                max(
+                    df[candidates].max()
+                ) + 5
+            ]
+        )
+    )
 
-            df[f"{c}_adjusted"] = (
+    st.plotly_chart(
+        trend_fig,
+        use_container_width=True
+    )
 
-                df[c]
+    # =====================================================
+    # MONTE CARLO
+    # =====================================================
 
-                -
+    for sim in range(NUM_SIMULATIONS):
 
-                df["pollster"].map(
-                    house_effect
-                )
-            )
+        final_dict = {}
 
-        # =================================================
-        # Bayesian Worlds
-        # =================================================
+        for c in candidates:
 
-        world_predictions = {
+            R, Q = calculate_auto_r_q(df, c)
 
-            c: []
+            weighted_sum = 0
+            weight_total = 0
 
-            for c in candidate_names
-        }
+            for _, row in df.iterrows():
 
-        progress = st.progress(0)
-
-        for world in range(world_count):
-
-            for c in candidate_names:
-
-                temp = (
-                    df.groupby("end_date")
-                    .mean(numeric_only=True)
-                    .reset_index()
-                )
-
-                temp = temp.sort_values(
-                    "end_date"
-                )
-
-                dynamic_r = []
-
-                for idx, row in temp.iterrows():
-
-                    p = row[f"{c}_adjusted"] / 100
-
-                    n = max(
-                        row["sample_size"],
-                        1
-                    )
-
-                    se = np.sqrt(
-                        (p * (1-p)) / n
-                    )
-
-                    se = max(
-                        se,
-                        0.0001
-                    )
-
-                    r_value = (
-                        (se * 100)**2
-                    ) * BASE_R
-
-                    dynamic_r.append(
-                        r_value
-                    )
-
-                temp["dynamic_r"] = dynamic_r
-
-                sampled_supports = []
-
-                sampled_prefs = []
-
-                sampled_undecided = []
-
-                for idx, row in temp.iterrows():
-
-                    se = np.sqrt(
-                        row["dynamic_r"]
-                    )
-
-                    sampled_supports.append(
-
-                        np.random.normal(
-                            row[f"{c}_adjusted"],
-                            se
-                        )
-                    )
-
-                    sampled_prefs.append(
-
-                        np.random.normal(
-                            row[f"{c}_pref"],
-                            se
-                        )
-                    )
-
-                    sampled_undecided.append(
-
-                        np.random.normal(
-                            row["undecided"],
-                            se
-                        )
-                    )
-
-                temp["sampled_support"] = np.clip(
-                    sampled_supports,
-                    0,
-                    100
-                )
-
-                temp["sampled_pref"] = np.clip(
-                    sampled_prefs,
-                    0,
-                    100
-                )
-
-                temp["sampled_undecided"] = np.clip(
-                    sampled_undecided,
-                    0,
-                    100
-                )
-
-                temp["support_kalman"] = (
-
-                    run_kalman(
-                        temp["sampled_support"],
-                        temp["dynamic_r"]
-                    )
-                )
-
-                temp["pref_kalman"] = (
-
-                    run_kalman(
-                        temp["sampled_pref"],
-                        temp["dynamic_r"]
-                    )
-                )
-
-                temp["undecided_kalman"] = (
-
-                    run_kalman(
-                        temp["sampled_undecided"],
-                        temp["dynamic_r"]
-                    )
-                )
-
-                temp["date_num"] = (
-
-                    temp["end_date"]
-
+                days_ago = (
+                    election_day
                     -
-
-                    temp["end_date"].min()
-
-                ).dt.days
-
-                X = temp[["date_num"]]
-
-                support_model = LinearRegression()
-
-                pref_model = LinearRegression()
-
-                undecided_model = LinearRegression()
-
-                support_model.fit(
-                    X,
-                    temp["support_kalman"]
-                )
-
-                pref_model.fit(
-                    X,
-                    temp["pref_kalman"]
-                )
-
-                undecided_model.fit(
-                    X,
-                    temp["undecided_kalman"]
-                )
-
-                election_num = (
-
-                    pd.to_datetime(election_day)
-
-                    -
-
-                    temp["end_date"].min()
-
+                    row["end_date"]
                 ).days
 
-                core_support = (
-
-                    support_model.predict(
-                        [[election_num]]
-                    )[0]
+                decay = np.exp(
+                    -0.03 * days_ago
                 )
 
-                undecided_size = (
+                se = calculate_se(
+                    row[c],
+                    row["sample_size"]
+                ) * R
 
-                    undecided_model.predict(
-                        [[election_num]]
-                    )[0]
+                sampled_support = np.random.normal(
+                    row[c],
+                    se
                 )
 
-                undecided_pref = (
-
-                    pref_model.predict(
-                        [[election_num]]
-                    )[0]
-                )
-
-                final_prediction = (
-
-                    core_support
-
-                    +
-
-                    (
-                        undecided_size
-
-                        *
-
-                        (
-                            undecided_pref / 100
-                        )
-                    )
-                )
-
-                final_prediction = np.clip(
-                    final_prediction,
+                sampled_support = max(
                     0,
-                    100
+                    sampled_support
                 )
 
-                world_predictions[c].append(
-                    final_prediction
-                )
-
-            progress.progress(
-                (world + 1) / world_count
-            )
-
-        # =================================================
-        # 최종 결과
-        # =================================================
-
-        final_results = []
-
-        for c in candidate_names:
-
-            sims = np.array(
-                world_predictions[c]
-            )
-
-            final_results.append({
-
-                "candidate": c,
-
-                "prediction": np.mean(sims),
-
-                "lower": np.percentile(
-                    sims,
-                    2.5
-                ),
-
-                "upper": np.percentile(
-                    sims,
-                    97.5
-                ),
-
-                "all_sims": sims
-            })
-
-        # =================================================
-        # 최종 정규화
-        # =================================================
-
-        total_prediction = sum(
-            x["prediction"]
-            for x in final_results
-        )
-
-        if total_prediction <= 0:
-            total_prediction = 1
-
-        for r in final_results:
-
-            r["prediction"] = (
-
-                r["prediction"]
-
-                /
-
-                total_prediction
-
-            ) * 100
-
-            r["lower"] = (
-
-                r["lower"]
-
-                /
-
-                total_prediction
-
-            ) * 100
-
-            r["upper"] = (
-
-                r["upper"]
-
-                /
-
-                total_prediction
-
-            ) * 100
-
-        # =================================================
-        # 승률 계산
-        # =================================================
-
-        win_counts = {
-            c: 0
-            for c in candidate_names
-        }
-
-        for i in range(world_count):
-
-            sample = {}
-
-            for r in final_results:
-
-                sample[
-                    r["candidate"]
-                ] = r["all_sims"][i]
-
-            total = sum(sample.values())
-
-            for k in sample:
-
-                sample[k] = (
-                    sample[k]
-                    / total
-                ) * 100
-
-            winner = max(
-                sample,
-                key=sample.get
-            )
-
-            win_counts[winner] += 1
-
-        # =================================================
-        # 결과표
-        # =================================================
-
-        st.header("8. 결과")
-
-        result_rows = []
-
-        for r in final_results:
-
-            win_rate = (
-
-                win_counts[r["candidate"]]
-
-                /
-
-                world_count
-
-            ) * 100
-
-            result_rows.append({
-
-                "후보":
-                    r["candidate"],
-
-                "예상 득표율":
-                    round(r["prediction"],2),
-
-                "승률":
-                    round(win_rate,2),
-
-                "95% 하한":
-                    round(r["lower"],2),
-
-                "95% 상한":
-                    round(r["upper"],2)
-            })
-
-        result_df = pd.DataFrame(
-            result_rows
-        )
-
-        result_df = result_df.sort_values(
-            "예상 득표율",
-            ascending=False
-        )
-
-        st.dataframe(
-            result_df,
-            use_container_width=True
-        )
-
-        # =================================================
-        # 그래프
-        # =================================================
-
-        st.header("9. 추세 그래프")
-
-        fig = go.Figure()
-
-        all_max = []
-
-        for c in candidate_names:
-
-            temp = (
-                df.groupby("end_date")
-                .mean(numeric_only=True)
-                .reset_index()
-            )
-
-            temp = temp.sort_values(
-                "end_date"
-            )
-
-            dynamic_r = []
-
-            for idx, row in temp.iterrows():
-
-                p = row[f"{c}_adjusted"] / 100
-
-                n = max(
-                    row["sample_size"],
+                undecided_n = max(
+                    row["sample_size"]
+                    *
+                    (
+                        row["undecided"] / 100
+                    ),
                     1
                 )
 
-                se = np.sqrt(
-                    (p * (1-p)) / n
+                pref = row[f"{c}_pref"]
+
+                pref_se = calculate_se(
+                    pref,
+                    undecided_n
+                ) * R
+
+                sampled_pref = np.random.normal(
+                    pref,
+                    pref_se
                 )
 
-                se = max(
-                    se,
-                    0.0001
+                sampled_pref = np.clip(
+                    sampled_pref,
+                    0,
+                    100
                 )
 
-                r_value = (
-                    (se * 100)**2
-                ) * BASE_R
-
-                dynamic_r.append(
-                    r_value
+                sampled_undecided = np.random.normal(
+                    row["undecided"],
+                    se
                 )
 
-            temp["dynamic_r"] = dynamic_r
-
-            temp["kalman"] = run_kalman(
-                temp[f"{c}_adjusted"],
-                temp["dynamic_r"]
-            )
-
-            temp["date_num"] = (
-
-                temp["end_date"]
-
-                -
-
-                temp["end_date"].min()
-
-            ).dt.days
-
-            X = temp[["date_num"]]
-
-            model = LinearRegression()
-
-            model.fit(
-                X,
-                temp["kalman"]
-            )
-
-            future_dates = pd.date_range(
-                start=temp["end_date"].min(),
-                end=pd.to_datetime(election_day),
-                freq="D"
-            )
-
-            future_num = (
-
-                future_dates
-
-                -
-
-                temp["end_date"].min()
-
-            ).days.values.reshape(-1,1)
-
-            preds = model.predict(
-                future_num
-            )
-
-            all_max.extend(preds)
-
-            # 실제 조사점
-
-            fig.add_trace(
-
-                go.Scatter(
-
-                    x=temp["end_date"],
-
-                    y=temp[f"{c}_adjusted"],
-
-                    mode="markers",
-
-                    name=f"{c} 실제조사"
+                sampled_undecided = max(
+                    0,
+                    sampled_undecided
                 )
-            )
 
-            # Kalman 추세선
-
-            fig.add_trace(
-
-                go.Scatter(
-
-                    x=temp["end_date"],
-
-                    y=temp["kalman"],
-
-                    mode="lines",
-
-                    name=f"{c} 추세"
+                momentum = np.random.normal(
+                    0,
+                    Q
                 )
-            )
 
-            # 미래 예측 점선
-
-            future_mask = (
-
-                future_dates
-                >
-                temp["end_date"].max()
-            )
-
-            fig.add_trace(
-
-                go.Scatter(
-
-                    x=future_dates[future_mask],
-
-                    y=preds[future_mask],
-
-                    mode="lines",
-
-                    line=dict(
-                        dash="dash"
-                    ),
-
-                    name=f"{c} 미래예측"
+                final_support = (
+                    sampled_support
+                    +
+                    sampled_undecided
+                    *
+                    (
+                        sampled_pref / 100
+                    )
+                    +
+                    momentum
                 )
+
+                weighted_sum += (
+                    final_support
+                    *
+                    decay
+                )
+
+                weight_total += decay
+
+            prediction = (
+                weighted_sum
+                /
+                weight_total
             )
 
-            # 신뢰구간
-
-            sims = np.array(
-                world_predictions[c]
-            )
-
-            spread = np.std(sims)
-
-            upper = preds + spread
-
-            lower = preds - spread
-
-            lower = np.clip(
-                lower,
+            prediction = max(
                 0,
-                100
+                prediction
             )
 
-            fig.add_trace(
+            final_dict[c] = prediction
 
-                go.Scatter(
+        # =================================================
+        # NORMALIZE
+        # =================================================
 
-                    x=list(future_dates)
-                    +
-                    list(future_dates[::-1]),
-
-                    y=list(upper)
-                    +
-                    list(lower[::-1]),
-
-                    fill="toself",
-
-                    opacity=0.15,
-
-                    line=dict(width=0),
-
-                    showlegend=False
-                )
-            )
-
-        max_y = max(all_max) + 5
-
-        max_y = min(
-            max_y,
-            100
+        total = sum(
+            final_dict.values()
         )
 
-        fig.update_layout(
+        if total <= 0:
 
-            height=700,
+            total = 1
 
-            yaxis=dict(
-                range=[0, max_y]
+        for c in candidates:
+
+            final_dict[c] = (
+                final_dict[c]
+                /
+                total
+            ) * 100
+
+            final_dict[c] = max(
+                0,
+                final_dict[c]
+            )
+
+            final_results[c].append(
+                final_dict[c]
+            )
+
+        winner = max(
+            final_dict,
+            key=final_dict.get
+        )
+
+        win_counts[winner] += 1
+
+        world_results.append(
+            {
+                "world": sim + 1,
+                "results": final_dict.copy()
+            }
+        )
+
+    # =====================================================
+    # FINAL RESULTS
+    # =====================================================
+
+    st.header("최종 예측")
+
+    result_table = []
+
+    for c in candidates:
+
+        avg = np.mean(
+            final_results[c]
+        )
+
+        lower = np.percentile(
+            final_results[c],
+            5
+        )
+
+        upper = np.percentile(
+            final_results[c],
+            95
+        )
+
+        win_rate = (
+            win_counts[c]
+            /
+            NUM_SIMULATIONS
+        ) * 100
+
+        result_table.append(
+            {
+                "후보": c,
+                "예상 득표율": round(avg,2),
+                "하한": round(lower,2),
+                "상한": round(upper,2),
+                "승률": round(win_rate,2)
+            }
+        )
+
+    result_df = pd.DataFrame(
+        result_table
+    )
+
+    st.dataframe(result_df)
+
+    # =====================================================
+    # FIVE THIRTY EIGHT STYLE
+    # =====================================================
+
+    st.markdown("---")
+
+    st.header("가능한 미래 시나리오")
+
+    selected_world = st.selectbox(
+        "미래 시나리오 선택",
+        [
+            w["world"]
+            for w in world_results
+        ]
+    )
+
+    selected_data = next(
+        w for w in world_results
+        if w["world"] == selected_world
+    )
+
+    st.subheader(
+        f"World {selected_world}"
+    )
+
+    world_df = pd.DataFrame(
+        {
+            "후보": list(
+                selected_data["results"].keys()
             ),
+            "득표율": list(
+                selected_data["results"].values()
+            )
+        }
+    )
 
-            xaxis_title="날짜",
+    st.dataframe(world_df)
 
-            yaxis_title="지지율 (%)",
+    fig = go.Figure()
 
-            hovermode="x unified"
+    fig.add_trace(
+        go.Bar(
+            x=world_df["후보"],
+            y=world_df["득표율"]
         )
+    )
 
-        st.plotly_chart(
-            fig,
-            use_container_width=True
+    fig.update_layout(
+        title=f"World {selected_world}",
+        yaxis=dict(
+            range=[
+                0,
+                max(
+                    world_df["득표율"]
+                ) + 5
+            ]
         )
+    )
+
+    st.plotly_chart(
+        fig,
+        use_container_width=True
+    )
+
+    winner = max(
+        selected_data["results"],
+        key=selected_data["results"].get
+    )
+
+    st.success(
+        f"예상 승리 후보: {winner}"
+    )
