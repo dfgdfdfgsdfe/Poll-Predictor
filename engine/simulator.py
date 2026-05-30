@@ -12,6 +12,10 @@ from engine.sampler import (
     generate_world
 )
 
+from data.poll_processor import (
+    average_sample_size
+)
+
 
 # =========================================================
 # 선거일까지 남은 일수
