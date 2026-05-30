@@ -3,23 +3,14 @@
 # =========================================================
 
 import numpy as np
-import pandas as pd
 
-from engine.kalman import (
-    build_filtered_state
+from engine.state_space import (
+    estimate_state_space,
+    forecast_to_election
 )
 
 from engine.sampler import (
-    sample_vote_shares,
-    sample_undecided_preferences,
-    allocate_undecided
-)
-
-from engine.state_space import (
-    create_state_vector,
-    build_q_matrix,
-    project_to_election_day,
-    final_state
+    generate_world
 )
 
 
@@ -27,132 +18,223 @@ from engine.state_space import (
 # 선거일까지 남은 일수
 # =========================================================
 
-def calculate_days_remaining(
-    latest_poll_date,
+def days_until_election(
+    dataframe,
     election_date
 ):
 
-    latest_poll_date = pd.to_datetime(
-        latest_poll_date
+    latest_poll = (
+        dataframe["end_date"]
+        .max()
     )
 
-    election_date = pd.to_datetime(
-        election_date
-    )
+    delta = (
 
-    days = (
         election_date
+
         -
-        latest_poll_date
+
+        latest_poll
+
     ).days
 
     return max(
-        days,
+        delta,
         0
     )
 
 
 # =========================================================
-# 단일 World 생성
+# 최신 무당층 선호
 # =========================================================
 
-def simulate_world(
-    filtered_state,
-    undecided_preferences,
-    sample_size,
-    candidate_names,
-    days_remaining,
-    volatility=0.15
+def latest_preferences(
+    dataframe,
+    candidate_names
 ):
 
-    supports = {}
+    latest = dataframe.iloc[-1]
 
-    for c in candidate_names:
+    result = {}
 
-        supports[c] = (
-            filtered_state[c]
+    for candidate in candidate_names:
+
+        result[candidate] = float(
+
+            latest[
+                f"{candidate}_pref"
+            ]
+
         )
 
-    undecided = (
-        filtered_state[
-            "UNDECIDED"
-        ]
-    )
+    return result
 
-    sampled_supports = (
-        sample_vote_shares(
-            supports,
-            undecided,
-            sample_size
-        )
-    )
 
-    sampled_preferences = (
-        sample_undecided_preferences(
-            undecided_preferences,
-            sampled_supports[
-                "UNDECIDED"
-            ],
-            sample_size
-        )
-    )
+# =========================================================
+# Forecast 생성
+# =========================================================
 
-    initial_result = (
-        allocate_undecided(
-            sampled_supports,
-            sampled_preferences
-        )
-    )
+def build_forecast(
+    dataframe,
+    candidate_names,
+    election_date
+):
 
-    state = create_state_vector(
-        initial_result,
-        0.0
-    )
+    state_space = (
 
-    q_matrix = build_q_matrix(
-        len(state),
-        volatility
-    )
+        estimate_state_space(
 
-    history = (
-        project_to_election_day(
-            state,
-            days_remaining,
-            q_matrix
-        )
-    )
+            dataframe,
 
-    election_state = (
-        final_state(
-            history
-        )
-    )
+            candidate_names
 
-    final_result = {}
-
-    for idx, c in enumerate(
-        candidate_names
-    ):
-
-        final_result[c] = float(
-            election_state[idx]
         )
 
-    winner = max(
-        final_result,
-        key=final_result.get
+    )
+
+    days = days_until_election(
+
+        dataframe,
+
+        election_date
+
+    )
+
+    forecast = (
+
+        forecast_to_election(
+
+            state_space,
+
+            days
+
+        )
+
     )
 
     return {
 
-        "winner":
-            winner,
+        "state_space":
+            state_space,
 
-        "final_result":
-            final_result,
+        "forecast":
+            forecast,
 
-        "history":
-            history
+        "days":
+            days
+    }
+
+
+# =========================================================
+# World 생성
+# =========================================================
+
+def simulate_worlds(
+    dataframe,
+    candidate_names,
+    election_date,
+    n_worlds=100
+):
+
+    forecast_data = (
+
+        build_forecast(
+
+            dataframe,
+
+            candidate_names,
+
+            election_date
+
+        )
+
+    )
+
+    forecast = (
+        forecast_data[
+            "forecast"
+        ]
+    )
+
+    preferences = (
+
+        latest_preferences(
+
+            dataframe,
+
+            candidate_names
+
+        )
+
+    )
+
+    latest_sample_size = int(
+
+        dataframe[
+            "sample_size"
+        ].iloc[-1]
+
+    )
+
+    supports = {}
+
+    for candidate in candidate_names:
+
+        supports[candidate] = (
+            forecast[candidate]
+        )
+
+    undecided = (
+        forecast["UNDECIDED"]
+    )
+
+    worlds = []
+
+    for world_id in range(
+        n_worlds
+    ):
+
+        world = generate_world(
+
+            supports,
+
+            undecided,
+
+            preferences,
+
+            latest_sample_size
+
+        )
+
+        world[
+            "world_id"
+        ] = (
+            world_id + 1
+        )
+
+        worlds.append(
+            world
+        )
+
+    return {
+
+        "worlds":
+            worlds,
+
+        "forecast":
+            forecast,
+
+        "state_space":
+
+            forecast_data[
+                "state_space"
+            ],
+
+        "days_until_election":
+
+            forecast_data[
+                "days"
+            ]
     }
 
 
@@ -161,34 +243,39 @@ def simulate_world(
 # =========================================================
 
 def calculate_win_rates(
-    worlds,
-    candidate_names
+    worlds
 ):
 
-    wins = {
-
-        c: 0
-
-        for c in candidate_names
-    }
+    counts = {}
 
     for world in worlds:
 
-        wins[
+        winner = (
             world["winner"]
-        ] += 1
+        )
+
+        counts[winner] = (
+
+            counts.get(
+                winner,
+                0
+            )
+
+            + 1
+
+        )
 
     total = len(
         worlds
     )
 
-    result = {}
+    rates = {}
 
-    for c in candidate_names:
+    for candidate, wins in counts.items():
 
-        result[c] = (
+        rates[candidate] = (
 
-            wins[c]
+            wins
 
             /
 
@@ -196,11 +283,11 @@ def calculate_win_rates(
 
         ) * 100
 
-    return result
+    return rates
 
 
 # =========================================================
-# 예측 구간 계산
+# 결과 테이블
 # =========================================================
 
 def build_prediction_table(
@@ -224,23 +311,19 @@ def build_prediction_table(
 
             )
 
-        values = np.array(
-            values
-        )
-
         rows.append({
 
-            "candidate":
+            "후보":
                 candidate,
 
-            "mean":
+            "예상 득표율":
+
                 float(
-                    np.mean(
-                        values
-                    )
+                    np.mean(values)
                 ),
 
-            "lower":
+            "95% 하한":
+
                 float(
                     np.percentile(
                         values,
@@ -248,7 +331,8 @@ def build_prediction_table(
                     )
                 ),
 
-            "upper":
+            "95% 상한":
+
                 float(
                     np.percentile(
                         values,
@@ -257,100 +341,12 @@ def build_prediction_table(
                 )
         })
 
-    return pd.DataFrame(
-        rows
+    rows.sort(
+
+        key=lambda x:
+        x["예상 득표율"],
+
+        reverse=True
     )
 
-
-# =========================================================
-# 메인 시뮬레이션
-# =========================================================
-
-def run_simulation(
-    dataframe,
-    candidate_names,
-    undecided_preferences,
-    election_date,
-    world_count=100
-):
-
-    filtered_state = (
-        build_filtered_state(
-            dataframe,
-            candidate_names
-        )
-    )
-
-    latest_poll_date = (
-        dataframe[
-            "end_date"
-        ].max()
-    )
-
-    sample_size = int(
-
-        dataframe[
-            "sample_size"
-        ].mean()
-
-    )
-
-    days_remaining = (
-        calculate_days_remaining(
-            latest_poll_date,
-            election_date
-        )
-    )
-
-    worlds = []
-
-    for _ in range(
-        world_count
-    ):
-
-        world = simulate_world(
-
-            filtered_state,
-
-            undecided_preferences,
-
-            sample_size,
-
-            candidate_names,
-
-            days_remaining
-
-        )
-
-        worlds.append(
-            world
-        )
-
-    prediction_table = (
-        build_prediction_table(
-            worlds,
-            candidate_names
-        )
-    )
-
-    win_rates = (
-        calculate_win_rates(
-            worlds,
-            candidate_names
-        )
-    )
-
-    return {
-
-        "worlds":
-            worlds,
-
-        "prediction_table":
-            prediction_table,
-
-        "win_rates":
-            win_rates,
-
-        "filtered_state":
-            filtered_state
-    }
+    return rows
