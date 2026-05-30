@@ -1,323 +1,274 @@
 # =========================================================
-# engine/state_space.py
+# engine/kalman.py
 # =========================================================
 
 import numpy as np
 
+from filterpy.kalman import (
+    KalmanFilter
+)
+
 
 # =========================================================
-# 상태 벡터 생성
+# 표본오차 → 관측오차
 # =========================================================
 
-def create_state_vector(
-    supports: dict,
-    undecided: float
+def poll_variance(
+    support_pct,
+    sample_size
 ):
     """
-    supports
+    비율추정 분산
 
-    {
-        "이재명": 44.0,
-        "김문수": 39.0,
-        "이준석": 7.0
-    }
-
-    undecided
-
-    10.0
-
-    반환
-
-    np.array(
-        [44.0, 39.0, 7.0, 10.0]
-    )
+    p(1-p)/n
     """
 
-    state = []
-
-    for candidate in supports:
-
-        state.append(
-            float(
-                supports[candidate]
-            )
-        )
-
-    state.append(
-        float(
-            undecided
+    p = max(
+        0.0001,
+        min(
+            support_pct / 100,
+            0.9999
         )
     )
 
-    return np.array(
-        state,
-        dtype=float
+    n = max(
+        sample_size,
+        1
     )
 
+    variance = (
 
-# =========================================================
-# 상태 정규화
-# =========================================================
+        p
+        *
+        (1 - p)
 
-def normalize_state(
-    state: np.ndarray
-):
-    """
-    합계를 100으로 정규화
-    """
+        /
 
-    total = np.sum(
-        state
+        n
+
     )
-
-    if total <= 0:
-
-        return state
 
     return (
-        state
-        /
-        total
-    ) * 100.0
-
-
-# =========================================================
-# 후보 수 반환
-# =========================================================
-
-def candidate_count(
-    state: np.ndarray
-):
-
-    return len(state) - 1
-
-
-# =========================================================
-# 무지지자 인덱스
-# =========================================================
-
-def undecided_index(
-    state: np.ndarray
-):
-
-    return len(state) - 1
-
-
-# =========================================================
-# 자동 Q 행렬 생성
-# =========================================================
-
-def build_q_matrix(
-    n_states: int,
-    volatility: float = 0.15
-):
-    """
-    Random Walk 공분산 행렬
-
-    volatility
-
-    0.05 = 매우 안정적
-
-    0.15 = 기본
-
-    0.30 = 매우 변동적
-    """
-
-    q = np.zeros(
-        (
-            n_states,
-            n_states
-        )
+        variance
+        *
+        100
+        *
+        100
     )
 
-    for i in range(
-        n_states
+
+# =========================================================
+# Kalman 생성
+# =========================================================
+
+def create_kalman_filter(
+    initial_value,
+    q_level=0.05
+):
+    """
+    상태
+
+    x[0]
+    = 지지율 수준
+
+    x[1]
+    = 추세
+    """
+
+    kf = KalmanFilter(
+        dim_x=2,
+        dim_z=1
+    )
+
+    # 상태
+
+    kf.x = np.array([
+
+        initial_value,
+
+        0.0
+
+    ])
+
+    # 상태전이
+
+    kf.F = np.array([
+
+        [1, 1],
+
+        [0, 1]
+
+    ])
+
+    # 관측행렬
+
+    kf.H = np.array([
+
+        [1, 0]
+
+    ])
+
+    # 공분산
+
+    kf.P *= 1000
+
+    # 시스템 노이즈
+
+    kf.Q = np.array([
+
+        [q_level, 0],
+
+        [0, q_level]
+
+    ])
+
+    return kf
+
+
+# =========================================================
+# Kalman 실행
+# =========================================================
+
+def run_kalman(
+    values,
+    variances,
+    q_level=0.05
+):
+    """
+    values
+
+    관측값
+
+    variances
+
+    관측오차
+    """
+
+    if len(values) == 0:
+
+        return []
+
+    kf = create_kalman_filter(
+
+        values[0],
+
+        q_level
+    )
+
+    filtered = []
+
+    trends = []
+
+    for value, variance in zip(
+
+        values,
+
+        variances
+
     ):
 
-        q[i, i] = volatility
+        kf.R = np.array([
+            [variance]
+        ])
 
-    for i in range(
-        n_states
-    ):
+        kf.predict()
 
-        for j in range(
-            n_states
-        ):
+        kf.update(
+            value
+        )
 
-            if i == j:
-                continue
-
-            q[i, j] = (
-                -volatility
-                * 0.25
+        filtered.append(
+            float(
+                kf.x[0]
             )
-
-    return q
-
-
-# =========================================================
-# 하루 상태 전이
-# =========================================================
-
-def random_walk_step(
-    state: np.ndarray,
-    q_matrix: np.ndarray
-):
-    """
-    θ(t)
-    =
-    θ(t−1)
-    +
-    η
-
-    η ~ MVN(0,Q)
-    """
-
-    noise = np.random.multivariate_normal(
-        mean=np.zeros(
-            len(state)
-        ),
-        cov=q_matrix
-    )
-
-    next_state = (
-        state
-        +
-        noise
-    )
-
-    next_state = np.clip(
-        next_state,
-        0,
-        None
-    )
-
-    next_state = normalize_state(
-        next_state
-    )
-
-    return next_state
-
-
-# =========================================================
-# N일 미래 생성
-# =========================================================
-
-def project_to_election_day(
-    initial_state: np.ndarray,
-    days_remaining: int,
-    q_matrix: np.ndarray
-):
-    """
-    반환
-
-    shape
-
-    [days + 1, state_size]
-    """
-
-    current = (
-        initial_state.copy()
-    )
-
-    history = [
-        current.copy()
-    ]
-
-    for _ in range(
-        days_remaining
-    ):
-
-        current = random_walk_step(
-            current,
-            q_matrix
         )
 
-        history.append(
-            current.copy()
+        trends.append(
+            float(
+                kf.x[1]
+            )
         )
 
-    return np.array(
-        history
-    )
+    return {
+
+        "filtered":
+            filtered,
+
+        "trend":
+            trends
+    }
 
 
 # =========================================================
-# 최종 상태 반환
+# 마지막 상태 추출
 # =========================================================
 
 def final_state(
-    history: np.ndarray
+    values,
+    variances,
+    q_level=0.05
 ):
+    result = run_kalman(
 
-    return history[-1]
+        values,
 
+        variances,
 
-# =========================================================
-# 상태를 딕셔너리로 변환
-# =========================================================
+        q_level
 
-def state_to_dict(
-    state: np.ndarray,
-    candidate_names: list
-):
-    """
-    state
+    )
 
-    [44,39,7,10]
+    if len(
+        result["filtered"]
+    ) == 0:
 
-    →
+        return None
 
-    {
-        "이재명":44,
-        "김문수":39,
-        "이준석":7,
-        "UNDECIDED":10
+    return {
+
+        "support":
+
+            result[
+                "filtered"
+            ][-1],
+
+        "trend":
+
+            result[
+                "trend"
+            ][-1]
     }
-    """
-
-    result = {}
-
-    for idx, candidate in enumerate(
-        candidate_names
-    ):
-
-        result[candidate] = float(
-            state[idx]
-        )
-
-    result["UNDECIDED"] = float(
-        state[-1]
-    )
-
-    return result
 
 
 # =========================================================
-# 딕셔너리를 상태로 변환
+# 미래 예측
 # =========================================================
 
-def dict_to_state(
-    state_dict: dict,
-    candidate_names: list
+def forecast_state(
+    support,
+    trend,
+    days
 ):
     """
-    state_to_dict 역변환
+    선형 상태공간 외삽
+
+    support_t
+    =
+    support
+    +
+    trend × days
     """
 
-    state = []
+    return (
 
-    for candidate in candidate_names:
+        support
 
-        state.append(
-            state_dict[candidate]
-        )
+        +
 
-    state.append(
-        state_dict["UNDECIDED"]
-    )
+        trend
 
-    return np.array(
-        state,
-        dtype=float
+        *
+
+        days
+
     )
