@@ -1,8 +1,48 @@
 # =========================================================
-# Bayesian Sampling Engine
+# engine/sampler.py
 # =========================================================
 
 import numpy as np
+
+
+# =========================================================
+# Dirichlet Alpha 생성
+# =========================================================
+
+def build_alpha_from_percentages(
+    percentages,
+    sample_size
+):
+    """
+    percentages
+
+    [44,39,7,10]
+
+    sample_size
+
+    1000
+
+    →
+    alpha
+    """
+
+    alpha = []
+
+    for pct in percentages:
+
+        count = (
+
+            pct
+            /
+            100.0
+
+        ) * sample_size
+
+        alpha.append(
+            count + 1
+        )
+
+    return alpha
 
 
 # =========================================================
@@ -15,43 +55,38 @@ def sample_vote_shares(
     sample_size
 ):
     """
-    supports:
-    {
-        "A":44,
-        "B":39,
-        "C":7
-    }
+    반환
 
-    undecided:
-    10
+    {
+        A:44.2,
+        B:38.8,
+        C:7.3,
+        UNDECIDED:9.7
+    }
     """
 
     labels = list(
         supports.keys()
     )
 
-    observed = [
-        supports[c]
-        for c in labels
-    ]
+    percentages = []
 
-    observed.append(
+    for candidate in labels:
+
+        percentages.append(
+            supports[candidate]
+        )
+
+    percentages.append(
         undecided
     )
 
-    alpha = []
-
-    for pct in observed:
-
-        count = (
-            pct
-            /
-            100
-        ) * sample_size
-
-        alpha.append(
-            count + 1
+    alpha = (
+        build_alpha_from_percentages(
+            percentages,
+            sample_size
         )
+    )
 
     draw = np.random.dirichlet(
         alpha
@@ -59,11 +94,12 @@ def sample_vote_shares(
 
     result = {}
 
-    for i, c in enumerate(
+    for idx, candidate in enumerate(
         labels
     ):
-        result[c] = (
-            draw[i]
+
+        result[candidate] = (
+            draw[idx]
             * 100
         )
 
@@ -76,54 +112,72 @@ def sample_vote_shares(
 
 
 # =========================================================
-# 무당층 선호도 샘플링
+# 무당층 선호 샘플링
 # =========================================================
 
 def sample_undecided_preferences(
-    undecided_pref,
-    undecided_pct,
+    undecided_preferences,
+    undecided_share,
     sample_size
 ):
     """
-    undecided_pref
+    무지지자 규모에 따라
+    유효 표본수 계산
 
-    {
-        "A":60,
-        "B":35,
-        "C":5
-    }
+    예
+
+    10%
+
+    ×
+
+    1000
+
+    =
+
+    100명
     """
 
     effective_n = max(
+
         1,
+
         round(
+
             sample_size
+
             *
-            undecided_pct
+
+            undecided_share
+
             /
+
             100
+
         )
     )
 
     labels = list(
-        undecided_pref.keys()
+        undecided_preferences.keys()
     )
 
-    alpha = []
+    percentages = []
 
-    for c in labels:
+    for candidate in labels:
 
-        pct = undecided_pref[c]
+        percentages.append(
 
-        count = (
-            pct
-            /
-            100
-        ) * effective_n
+            undecided_preferences[
+                candidate
+            ]
 
-        alpha.append(
-            count + 1
         )
+
+    alpha = (
+        build_alpha_from_percentages(
+            percentages,
+            effective_n
+        )
+    )
 
     draw = np.random.dirichlet(
         alpha
@@ -131,11 +185,12 @@ def sample_undecided_preferences(
 
     result = {}
 
-    for i, c in enumerate(
+    for idx, candidate in enumerate(
         labels
     ):
-        result[c] = (
-            draw[i]
+
+        result[candidate] = (
+            draw[idx]
             * 100
         )
 
@@ -151,25 +206,22 @@ def allocate_undecided(
     sampled_preferences
 ):
     """
-    sampled_supports
-
-    {
-        A:43.8
-        B:39.2
-        C:7.1
-        UNDECIDED:9.9
-    }
+    최종 득표율 계산
     """
 
-    undecided = sampled_supports[
-        "UNDECIDED"
-    ]
+    undecided = (
 
-    final_result = {}
+        sampled_supports[
+            "UNDECIDED"
+        ]
+
+    )
+
+    result = {}
 
     for candidate in sampled_preferences:
 
-        final_result[candidate] = (
+        result[candidate] = (
 
             sampled_supports[
                 candidate
@@ -182,26 +234,32 @@ def allocate_undecided(
             *
 
             (
+
                 sampled_preferences[
                     candidate
                 ]
+
                 /
+
                 100
+
             )
+
         )
 
     total = sum(
-        final_result.values()
+        result.values()
     )
 
     if total <= 0:
+
         total = 1
 
-    for c in final_result:
+    for candidate in result:
 
-        final_result[c] = (
+        result[candidate] = (
 
-            final_result[c]
+            result[candidate]
 
             /
 
@@ -209,7 +267,7 @@ def allocate_undecided(
 
         ) * 100
 
-    return final_result
+    return result
 
 
 # =========================================================
@@ -219,33 +277,53 @@ def allocate_undecided(
 def generate_world(
     supports,
     undecided,
-    undecided_pref,
+    undecided_preferences,
     sample_size
 ):
+    """
+    가능세계 1개
+    """
 
     sampled_supports = (
+
         sample_vote_shares(
+
             supports,
+
             undecided,
+
             sample_size
+
         )
+
     )
 
     sampled_preferences = (
+
         sample_undecided_preferences(
-            undecided_pref,
+
+            undecided_preferences,
+
             sampled_supports[
                 "UNDECIDED"
             ],
+
             sample_size
+
         )
+
     )
 
     final_result = (
+
         allocate_undecided(
+
             sampled_supports,
+
             sampled_preferences
+
         )
+
     )
 
     winner = max(
@@ -276,7 +354,7 @@ def generate_world(
 def generate_worlds(
     supports,
     undecided,
-    undecided_pref,
+    undecided_preferences,
     sample_size,
     n_worlds=100
 ):
@@ -287,13 +365,20 @@ def generate_worlds(
     ):
 
         world = generate_world(
+
             supports,
+
             undecided,
-            undecided_pref,
+
+            undecided_preferences,
+
             sample_size
+
         )
 
-        world["world_id"] = (
+        world[
+            "world_id"
+        ] = (
             world_id + 1
         )
 
@@ -311,6 +396,7 @@ def generate_worlds(
 def calculate_win_rates(
     worlds
 ):
+
     counts = {}
 
     for world in worlds:
@@ -320,28 +406,32 @@ def calculate_win_rates(
         ]
 
         counts[winner] = (
+
             counts.get(
                 winner,
                 0
             )
+
             + 1
+
         )
 
     total = len(
         worlds
     )
 
-    return {
+    results = {}
 
-        candidate:
-        (
+    for candidate, wins in counts.items():
+
+        results[candidate] = (
+
             wins
+
             /
+
             total
+
         ) * 100
 
-        for candidate,
-        wins
-
-        in counts.items()
-    }
+    return results
