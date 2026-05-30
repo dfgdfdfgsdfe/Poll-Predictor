@@ -4,320 +4,233 @@
 
 import numpy as np
 
+from engine.kalman import (
+    poll_variance,
+    final_state,
+    forecast_state
+)
+
 
 # =========================================================
-# 상태 벡터 생성
+# 후보 1명 처리
 # =========================================================
 
-def create_state_vector(
-    supports: dict,
-    undecided: float
+def estimate_candidate_state(
+    dataframe,
+    candidate
 ):
     """
-    supports
-
-    {
-        "이재명": 44.0,
-        "김문수": 39.0,
-        "이준석": 7.0
-    }
-
-    undecided
-
-    10.0
-
-    반환
-
-    np.array(
-        [44.0, 39.0, 7.0, 10.0]
-    )
+    후보 1명의
+    잠재 지지율 추정
     """
 
-    state = []
+    values = (
+        dataframe[candidate]
+        .astype(float)
+        .tolist()
+    )
 
-    for candidate in supports:
+    variances = []
 
-        state.append(
-            float(
-                supports[candidate]
-            )
+    for _, row in dataframe.iterrows():
+
+        variance = poll_variance(
+            row[candidate],
+            row["sample_size"]
         )
 
-    state.append(
-        float(
-            undecided
-        )
-    )
-
-    return np.array(
-        state,
-        dtype=float
-    )
-
-
-# =========================================================
-# 상태 정규화
-# =========================================================
-
-def normalize_state(
-    state: np.ndarray
-):
-    """
-    합계를 100으로 정규화
-    """
-
-    total = np.sum(
-        state
-    )
-
-    if total <= 0:
-
-        return state
-
-    return (
-        state
-        /
-        total
-    ) * 100.0
-
-
-# =========================================================
-# 후보 수 반환
-# =========================================================
-
-def candidate_count(
-    state: np.ndarray
-):
-
-    return len(state) - 1
-
-
-# =========================================================
-# 무지지자 인덱스
-# =========================================================
-
-def undecided_index(
-    state: np.ndarray
-):
-
-    return len(state) - 1
-
-
-# =========================================================
-# 자동 Q 행렬 생성
-# =========================================================
-
-def build_q_matrix(
-    n_states: int,
-    volatility: float = 0.15
-):
-    """
-    Random Walk 공분산 행렬
-
-    volatility
-
-    0.05 = 매우 안정적
-
-    0.15 = 기본
-
-    0.30 = 매우 변동적
-    """
-
-    q = np.zeros(
-        (
-            n_states,
-            n_states
-        )
-    )
-
-    for i in range(
-        n_states
-    ):
-
-        q[i, i] = volatility
-
-    for i in range(
-        n_states
-    ):
-
-        for j in range(
-            n_states
-        ):
-
-            if i == j:
-                continue
-
-            q[i, j] = (
-                -volatility
-                * 0.25
-            )
-
-    return q
-
-
-# =========================================================
-# 하루 상태 전이
-# =========================================================
-
-def random_walk_step(
-    state: np.ndarray,
-    q_matrix: np.ndarray
-):
-    """
-    θ(t)
-    =
-    θ(t−1)
-    +
-    η
-
-    η ~ MVN(0,Q)
-    """
-
-    noise = np.random.multivariate_normal(
-        mean=np.zeros(
-            len(state)
-        ),
-        cov=q_matrix
-    )
-
-    next_state = (
-        state
-        +
-        noise
-    )
-
-    next_state = np.clip(
-        next_state,
-        0,
-        None
-    )
-
-    next_state = normalize_state(
-        next_state
-    )
-
-    return next_state
-
-
-# =========================================================
-# N일 미래 생성
-# =========================================================
-
-def project_to_election_day(
-    initial_state: np.ndarray,
-    days_remaining: int,
-    q_matrix: np.ndarray
-):
-    """
-    반환
-
-    shape
-
-    [days + 1, state_size]
-    """
-
-    current = (
-        initial_state.copy()
-    )
-
-    history = [
-        current.copy()
-    ]
-
-    for _ in range(
-        days_remaining
-    ):
-
-        current = random_walk_step(
-            current,
-            q_matrix
+        variances.append(
+            variance
         )
 
-        history.append(
-            current.copy()
-        )
-
-    return np.array(
-        history
+    return final_state(
+        values,
+        variances
     )
 
 
 # =========================================================
-# 최종 상태 반환
+# 무지지자 처리
 # =========================================================
 
-def final_state(
-    history: np.ndarray
+def estimate_undecided_state(
+    dataframe
 ):
 
-    return history[-1]
+    values = (
+        dataframe["undecided"]
+        .astype(float)
+        .tolist()
+    )
+
+    variances = []
+
+    for _, row in dataframe.iterrows():
+
+        variance = poll_variance(
+            row["undecided"],
+            row["sample_size"]
+        )
+
+        variances.append(
+            variance
+        )
+
+    return final_state(
+        values,
+        variances
+    )
 
 
 # =========================================================
-# 상태를 딕셔너리로 변환
+# 전체 상태 추정
 # =========================================================
 
-def state_to_dict(
-    state: np.ndarray,
-    candidate_names: list
+def estimate_state_space(
+    dataframe,
+    candidate_names
 ):
     """
-    state
-
-    [44,39,7,10]
-
-    →
-
-    {
-        "이재명":44,
-        "김문수":39,
-        "이준석":7,
-        "UNDECIDED":10
-    }
+    모든 후보 +
+    무지지자
     """
 
     result = {}
 
-    for idx, candidate in enumerate(
-        candidate_names
-    ):
+    for candidate in candidate_names:
 
-        result[candidate] = float(
-            state[idx]
+        result[candidate] = (
+            estimate_candidate_state(
+                dataframe,
+                candidate
+            )
         )
 
-    result["UNDECIDED"] = float(
-        state[-1]
+    result["UNDECIDED"] = (
+        estimate_undecided_state(
+            dataframe
+        )
     )
 
     return result
 
 
 # =========================================================
-# 딕셔너리를 상태로 변환
+# 선거일까지 예측
 # =========================================================
 
-def dict_to_state(
-    state_dict: dict,
-    candidate_names: list
+def forecast_to_election(
+    state_space,
+    days_until_election
 ):
     """
-    state_to_dict 역변환
+    Kalman 상태를
+    선거일까지 외삽
     """
 
-    state = []
+    forecast = {}
 
-    for candidate in candidate_names:
+    for name, state in state_space.items():
 
-        state.append(
-            state_dict[candidate]
+        support = state[
+            "support"
+        ]
+
+        trend = state[
+            "trend"
+        ]
+
+        predicted = (
+            forecast_state(
+                support,
+                trend,
+                days_until_election
+            )
         )
 
-    state.append(
-        state_dict["UNDECIDED"]
-    )
+        predicted = np.clip(
+            predicted,
+            0,
+            100
+        )
 
-    return np.array(
-        state,
-        dtype=float
-    )
+        forecast[name] = (
+            float(predicted)
+        )
+
+    return forecast
+
+
+# =========================================================
+# 정규화
+# =========================================================
+
+def normalize_forecast(
+    forecast
+):
+    """
+    후보 비율 총합 100
+    """
+
+    result = {}
+
+    candidate_total = 0
+
+    for name, value in forecast.items():
+
+        if name == "UNDECIDED":
+            continue
+
+        candidate_total += value
+
+    if candidate_total <= 0:
+        candidate_total = 1
+
+    for name, value in forecast.items():
+
+        if name == "UNDECIDED":
+
+            result[name] = value
+
+        else:
+
+            result[name] = (
+                value
+                /
+                candidate_total
+            ) * 100
+
+    return result
+
+
+# =========================================================
+# 최근 상태 요약
+# =========================================================
+
+def build_state_summary(
+    state_space
+):
+
+    rows = []
+
+    for name, state in state_space.items():
+
+        rows.append({
+
+            "name":
+                name,
+
+            "support":
+                round(
+                    state["support"],
+                    2
+                ),
+
+            "trend":
+                round(
+                    state["trend"],
+                    4
+                )
+        })
+
+    return rows
