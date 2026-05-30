@@ -7,29 +7,118 @@ import streamlit as st
 
 
 # =========================================================
-# 단일 World 카드
+# World → DataFrame
 # =========================================================
 
-def render_world_card(
-    world,
+def worlds_to_dataframe(
+    worlds,
     candidate_names
 ):
 
-    winner = world[
-        "winner"
-    ]
+    rows = []
 
-    world_id = world.get(
-        "world_id",
-        "-"
+    for world in worlds:
+
+        row = {
+
+            "World":
+                world["world_id"],
+
+            "Winner":
+                world["winner"]
+        }
+
+        for candidate in candidate_names:
+
+            row[candidate] = round(
+
+                world[
+                    "final_result"
+                ][candidate],
+
+                2
+
+            )
+
+        rows.append(
+            row
+        )
+
+    df = pd.DataFrame(
+        rows
     )
 
-    st.markdown(
-        f"""
-### 🌎 World {world_id}
+    return df
 
-**승자:** {winner}
-"""
+
+# =========================================================
+# 전체 세계 테이블
+# =========================================================
+
+def render_world_table(
+    worlds,
+    candidate_names
+):
+
+    df = worlds_to_dataframe(
+
+        worlds,
+
+        candidate_names
+
+    )
+
+    st.dataframe(
+
+        df,
+
+        use_container_width=True
+
+    )
+
+
+# =========================================================
+# 단일 세계 보기
+# =========================================================
+
+def render_single_world(
+    worlds,
+    candidate_names
+):
+
+    if len(worlds) == 0:
+
+        st.warning(
+            "세계가 없습니다."
+        )
+
+        return
+
+    selected = st.selectbox(
+
+        "가능세계 선택",
+
+        range(
+            1,
+            len(worlds) + 1
+        )
+
+    )
+
+    world = worlds[
+        selected - 1
+    ]
+
+    st.subheader(
+
+        f"World {selected}"
+
+    )
+
+    st.write(
+
+        f"승자: {world['winner']}"
+
     )
 
     rows = []
@@ -42,116 +131,56 @@ def render_world_card(
                 candidate,
 
             "득표율":
+
                 round(
+
                     world[
-                        "final_result"
+                        'final_result'
                     ][candidate],
+
                     2
+
                 )
+
         })
 
-    df = pd.DataFrame(
-        rows
-    )
-
-    df = df.sort_values(
-        "득표율",
-        ascending=False
-    )
-
     st.dataframe(
-        df,
-        use_container_width=True,
-        hide_index=True
+
+        pd.DataFrame(
+            rows
+        ),
+
+        use_container_width=True
+
     )
 
 
 # =========================================================
-# World 목록
+# 승자별 세계 수
 # =========================================================
 
-def render_worlds(
-    worlds,
-    candidate_names
+def winner_summary(
+    worlds
 ):
 
-    st.header(
-        "🌎 가능세계 목록"
-    )
+    counts = {}
 
     for world in worlds:
 
-        with st.expander(
-
-            f"World {world['world_id']} | 승자: {world['winner']}"
-
-        ):
-
-            render_world_card(
-                world,
-                candidate_names
-            )
-
-
-# =========================================================
-# 상위 World
-# =========================================================
-
-def render_top_worlds(
-    worlds,
-    candidate_names,
-    count=10
-):
-
-    st.header(
-        f"🏆 대표 가능세계 {count}개"
-    )
-
-    selected = worlds[
-        :count
-    ]
-
-    for world in selected:
-
-        with st.expander(
-
-            f"World {world['world_id']}"
-
-        ):
-
-            render_world_card(
-                world,
-                candidate_names
-            )
-
-
-# =========================================================
-# 승자별 World 개수
-# =========================================================
-
-def render_world_summary(
-    worlds,
-    candidate_names
-):
-
-    st.header(
-        "📊 World 분포"
-    )
-
-    counts = {
-
-        candidate: 0
-
-        for candidate
-
-        in candidate_names
-    }
-
-    for world in worlds:
-
-        counts[
+        winner = (
             world["winner"]
-        ] += 1
+        )
+
+        counts[winner] = (
+
+            counts.get(
+                winner,
+                0
+            )
+
+            + 1
+
+        )
 
     rows = []
 
@@ -159,102 +188,226 @@ def render_world_summary(
         worlds
     )
 
-    for candidate in candidate_names:
+    for winner, count in counts.items():
 
         rows.append({
 
             "후보":
-                candidate,
+                winner,
 
-            "World 수":
-                counts[
-                    candidate
-                ],
+            "승리 세계":
+
+                count,
 
             "비율":
+
                 round(
 
-                    counts[
-                        candidate
-                    ]
-
+                    count
                     /
-
                     total
-
-                    * 100,
+                    *
+                    100,
 
                     2
+
                 )
+
         })
 
-    df = pd.DataFrame(
+    return pd.DataFrame(
         rows
     )
 
-    df = df.sort_values(
-        "World 수",
-        ascending=False
-    )
-
-    st.dataframe(
-        df,
-        use_container_width=True,
-        hide_index=True
-    )
-
 
 # =========================================================
-# 특정 후보 승리 World만 보기
+# 승자 요약 표시
 # =========================================================
 
-def render_candidate_worlds(
-    worlds,
-    candidate_names,
-    selected_candidate
+def render_winner_summary(
+    worlds
 ):
 
-    st.header(
-        f"🎯 {selected_candidate} 승리 World"
+    st.dataframe(
+
+        winner_summary(
+            worlds
+        ),
+
+        use_container_width=True
+
     )
 
-    filtered = []
 
-    for world in worlds:
+# =========================================================
+# 상위 N개 세계
+# =========================================================
 
-        if (
+def top_worlds(
+    worlds,
+    candidate,
+    top_n=10
+):
 
-            world[
-                "winner"
-            ]
+    sorted_worlds = sorted(
 
-            ==
+        worlds,
 
-            selected_candidate
+        key=lambda x:
 
-        ):
+        x["final_result"][
+            candidate
+        ],
 
-            filtered.append(
-                world
-            )
+        reverse=True
 
-    if len(filtered) == 0:
+    )
 
-        st.warning(
-            "해당 World 없음"
+    rows = []
+
+    for world in sorted_worlds[
+        :top_n
+    ]:
+
+        rows.append({
+
+            "World":
+                world["world_id"],
+
+            candidate:
+
+                round(
+
+                    world[
+                        "final_result"
+                    ][candidate],
+
+                    2
+
+                ),
+
+            "Winner":
+                world["winner"]
+
+        })
+
+    return pd.DataFrame(
+        rows
+    )
+
+
+# =========================================================
+# 하위 N개 세계
+# =========================================================
+
+def bottom_worlds(
+    worlds,
+    candidate,
+    top_n=10
+):
+
+    sorted_worlds = sorted(
+
+        worlds,
+
+        key=lambda x:
+
+        x["final_result"][
+            candidate
+        ]
+
+    )
+
+    rows = []
+
+    for world in sorted_worlds[
+        :top_n
+    ]:
+
+        rows.append({
+
+            "World":
+                world["world_id"],
+
+            candidate:
+
+                round(
+
+                    world[
+                        "final_result"
+                    ][candidate],
+
+                    2
+
+                ),
+
+            "Winner":
+                world["winner"]
+
+        })
+
+    return pd.DataFrame(
+        rows
+    )
+
+
+# =========================================================
+# 후보별 극단 세계
+# =========================================================
+
+def render_candidate_extremes(
+    worlds,
+    candidate_names
+):
+
+    candidate = st.selectbox(
+
+        "후보 선택",
+
+        candidate_names,
+
+        key="extreme_candidate"
+
+    )
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+
+        st.subheader(
+            "최고 시나리오"
         )
 
-        return
+        st.dataframe(
 
-    for world in filtered:
+            top_worlds(
 
-        with st.expander(
+                worlds,
 
-            f"World {world['world_id']}"
+                candidate
 
-        ):
+            ),
 
-            render_world_card(
-                world,
-                candidate_names
-            )
+            use_container_width=True
+
+        )
+
+    with col2:
+
+        st.subheader(
+            "최저 시나리오"
+        )
+
+        st.dataframe(
+
+            bottom_worlds(
+
+                worlds,
+
+                candidate
+
+            ),
+
+            use_container_width=True
+
+        )
