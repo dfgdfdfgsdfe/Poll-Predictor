@@ -1,9 +1,10 @@
 # =========================================================
 # app.py
-# Ultimate Bayesian Election Predictor
+# Ultimate Bayesian Election Predictor (Full Version)
 # =========================================================
 
 import streamlit as st
+import pandas as pd
 
 from data.models import (
     ElectionProject,
@@ -13,7 +14,6 @@ from data.models import (
 from data.storage import (
     save_project,
     load_project,
-    delete_project,
     list_projects
 )
 
@@ -45,7 +45,7 @@ from ui.worlds_view import (
 
 
 # =========================================================
-# Streamlit 설정
+# SETUP
 # =========================================================
 
 st.set_page_config(
@@ -53,9 +53,8 @@ st.set_page_config(
     layout="wide"
 )
 
-
 # =========================================================
-# 세션 상태
+# SESSION STATE
 # =========================================================
 
 if "project" not in st.session_state:
@@ -76,20 +75,16 @@ if st.session_state.page == "menu":
 
     st.title("Ultimate Bayesian Election Predictor")
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
 
     with col1:
-
         if st.button("새 프로젝트"):
-
             st.session_state.project = None
             st.session_state.page = "create"
             st.rerun()
 
     with col2:
-
         if st.button("불러오기"):
-
             st.session_state.page = "load"
             st.rerun()
 
@@ -107,9 +102,7 @@ if st.session_state.page == "create":
     name = st.text_input("프로젝트 이름")
     election_date = st.date_input("선거일")
 
-    candidates_raw = st.text_input(
-        "후보 (콤마로 구분)"
-    )
+    candidates_raw = st.text_input("후보 (콤마 구분)")
 
     if st.button("생성"):
 
@@ -120,13 +113,10 @@ if st.session_state.page == "create":
         ]
 
         st.session_state.project = ElectionProject(
-
             project_name=name,
-
             election_date=str(election_date),
-
-            candidate_names=candidates
-
+            candidate_names=candidates,
+            polls=[]
         )
 
         st.session_state.page = "editor"
@@ -145,21 +135,16 @@ if st.session_state.page == "load":
 
     projects = list_projects()
 
-    if len(projects) == 0:
-
+    if not projects:
         st.warning("저장된 프로젝트 없음")
         st.stop()
 
-    selected = st.selectbox(
-        "선택",
-        projects
-    )
+    selected = st.selectbox("선택", projects)
 
     if st.button("불러오기"):
 
-        project = load_project(selected)
-
-        st.session_state.project = project
+        st.session_state.project = load_project(selected)
+        st.session_state.result = None
         st.session_state.page = "editor"
         st.rerun()
 
@@ -170,65 +155,54 @@ if st.session_state.page == "load":
 # EDITOR
 # =========================================================
 
-if st.session_state.page == "editor":
+project = st.session_state.project
 
-    project = st.session_state.project
+if project is None:
+    st.stop()
 
-    st.title(project.project_name)
+st.title(project.project_name)
 
-    st.write("선거일:", project.election_date)
-    st.write("후보:", project.candidate_names)
+st.write("선거일:", project.election_date)
+st.write("후보:", project.candidate_names)
 
-    # -----------------------------------------------------
-    # Poll 입력
-    # -----------------------------------------------------
+# =========================================================
+# POLL INPUT
+# =========================================================
 
-    st.header("여론조사 입력")
+st.header("여론조사 추가")
 
-    with st.form("poll_form"):
+with st.form("poll_form"):
 
-        pollster = st.text_input("조사기관")
-        start_date = st.date_input("시작일")
-        end_date = st.date_input("종료일")
-        sample_size = st.number_input("표본수", 1, 100000, 1000)
+    pollster = st.text_input("조사기관")
+    start_date = st.date_input("시작일")
+    end_date = st.date_input("종료일")
+    sample_size = st.number_input("표본수", 1, 1_000_000, 1000)
 
-        st.subheader("후보 지지율")
+    st.subheader("후보 지지율")
 
-        supports = {}
+    supports = {}
+    for c in project.candidate_names:
+        supports[c] = st.number_input(c, 0.0, 100.0, 0.0)
 
-        for c in project.candidate_names:
+    st.subheader("무당층 선호")
 
-            supports[c] = st.number_input(
-                f"{c}",
-                0.0,
-                100.0,
-                0.0
-            )
-
-        st.subheader("무당층 선호")
-
-        undecided_pref = {}
-
-        for c in project.candidate_names:
-
-            undecided_pref[c] = st.number_input(
-                f"{c} 선호",
-                0.0,
-                100.0,
-                0.0
-            )
-
-        undecided = max(
+    undecided_pref = {}
+    for c in project.candidate_names:
+        undecided_pref[c] = st.number_input(
+            f"{c} 선호",
             0.0,
-            100 - sum(supports.values())
+            100.0,
+            0.0
         )
 
-        submitted = st.form_submit_button("추가")
+    undecided = max(0.0, 100 - sum(supports.values()))
 
-        if submitted:
+    submitted = st.form_submit_button("추가")
 
-            poll = Poll(
+    if submitted:
 
+        project.polls.append(
+            Poll(
                 pollster=pollster,
                 start_date=str(start_date),
                 end_date=str(end_date),
@@ -236,134 +210,165 @@ if st.session_state.page == "editor":
                 supports=supports,
                 undecided=undecided,
                 undecided_preferences=undecided_pref
+            )
+        )
 
+        st.success("추가 완료")
+        st.rerun()
+
+
+# =========================================================
+# POLL LIST + EDIT (핵심 추가 기능)
+# =========================================================
+
+st.header("등록된 여론조사 (조회 / 수정)")
+
+for i, poll in enumerate(project.polls):
+
+    with st.expander(f"{i+1}. {poll.pollster} | {poll.end_date}"):
+
+        # -------------------------
+        # basic edit
+        # -------------------------
+
+        poll.pollster = st.text_input(
+            "기관",
+            value=poll.pollster,
+            key=f"p_{i}_name"
+        )
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            poll.start_date = str(
+                st.date_input(
+                    "시작일",
+                    value=pd.to_datetime(poll.start_date),
+                    key=f"p_{i}_start"
+                )
             )
 
-            project.add_poll(poll)
+        with col2:
+            poll.end_date = str(
+                st.date_input(
+                    "종료일",
+                    value=pd.to_datetime(poll.end_date),
+                    key=f"p_{i}_end"
+                )
+            )
 
-            st.success("추가 완료")
-
-    # -----------------------------------------------------
-    # 저장
-    # -----------------------------------------------------
-
-    if st.button("저장"):
-
-        save_project(project)
-        st.success("저장 완료")
-
-    # -----------------------------------------------------
-    # 실행
-    # -----------------------------------------------------
-
-    if st.button("시뮬레이션 실행"):
-
-        df = project_to_dataframe(project)
-
-        inputs = build_simulator_inputs(project)
-
-        result = run_simulation(
-
-            df,
-            inputs["candidate_names"],
-            project.election_date,
-            world_count=100
-
+        poll.sample_size = st.number_input(
+            "표본수",
+            value=int(poll.sample_size),
+            min_value=1,
+            key=f"p_{i}_sample"
         )
 
-        st.session_state.result = result
+        # -------------------------
+        # supports
+        # -------------------------
 
-    # -----------------------------------------------------
-    # 결과 출력
-    # -----------------------------------------------------
+        st.subheader("지지율")
 
-    result = st.session_state.result
+        for c in project.candidate_names:
 
-    if result:
+            poll.supports[c] = st.number_input(
+                c,
+                value=float(poll.supports.get(c, 0.0)),
+                0.0,
+                100.0,
+                key=f"p_{i}_{c}"
+            )
 
-        st.header("결과")
-
-        st.dataframe(
-            result["prediction_table"],
-            use_container_width=True
+        poll.undecided = max(
+            0.0,
+            100 - sum(poll.supports.values())
         )
 
-        st.subheader("승률")
+        st.info(f"무당층: {poll.undecided:.2f}%")
 
-        st.dataframe(
-            result["win_rates"]
-        )
+        # -------------------------
+        # undecided pref
+        # -------------------------
 
-        st.plotly_chart(
-            prediction_bar_chart(
-                result["prediction_table"]
-            ),
-            use_container_width=True
-        )
+        st.subheader("무당층 선호")
 
-        st.plotly_chart(
-            win_rate_chart(
-                result["win_rates"]
-            ),
-            use_container_width=True
-        )
+        for c in project.candidate_names:
 
-        st.plotly_chart(
-            world_distribution_chart(
-                result["worlds"],
-                project.candidate_names
-            ),
-            use_container_width=True
-        )
+            poll.undecided_preferences[c] = st.number_input(
+                f"{c} 선호",
+                value=float(
+                    poll.undecided_preferences.get(c, 0.0)
+                ),
+                0.0,
+                100.0,
+                key=f"p_{i}_pref_{c}"
+            )
 
-        st.plotly_chart(
-            candidate_boxplot(
-                result["worlds"],
-                project.candidate_names
-            ),
-            use_container_width=True
-        )
+        # -------------------------
+        # delete
+        # -------------------------
 
-        st.plotly_chart(
-            trend_chart(
-                df,
-                project.candidate_names
-            ),
-            use_container_width=True
-        )
+        if st.button("삭제", key=f"del_{i}"):
 
-        st.plotly_chart(
-            winner_distribution_chart(
-                result["worlds"]
-            ),
-            use_container_width=True
-        )
+            project.polls.pop(i)
+            st.rerun()
 
-        st.plotly_chart(
-            fte_probability_chart(
-                result["worlds"],
-                project.candidate_names
-            ),
-            use_container_width=True
-        )
 
-        st.header("가능세계")
+# =========================================================
+# SAVE
+# =========================================================
 
-        render_world_table(
-            result["worlds"],
-            project.candidate_names
-        )
+if st.button("저장"):
 
-        render_single_world(
-            result["worlds"],
-            project.candidate_names
-        )
+    save_project(project)
+    st.success("저장 완료")
 
-        render_winner_summary(
-            result["worlds"]
-        )
 
-        render_candidate_extremes(
-            result["worlds"],
-            project.candidate_names
-        )
+# =========================================================
+# RUN SIMULATION
+# =========================================================
+
+if st.button("시뮬레이션 실행"):
+
+    df = project_to_dataframe(project)
+
+    inputs = build_simulator_inputs(project)
+
+    result = run_simulation(
+        df,
+        inputs["candidate_names"],
+        project.election_date,
+        world_count=100
+    )
+
+    st.session_state.result = result
+
+
+# =========================================================
+# RESULT VIEW
+# =========================================================
+
+result = st.session_state.result
+
+if result:
+
+    st.header("결과")
+
+    st.dataframe(result["prediction_table"])
+    st.dataframe(result["win_rates"])
+
+    st.plotly_chart(prediction_bar_chart(result["prediction_table"]))
+    st.plotly_chart(win_rate_chart(result["win_rates"]))
+    st.plotly_chart(world_distribution_chart(result["worlds"], project.candidate_names))
+    st.plotly_chart(candidate_boxplot(result["worlds"], project.candidate_names))
+    st.plotly_chart(trend_chart(df, project.candidate_names))
+    st.plotly_chart(winner_distribution_chart(result["worlds"]))
+    st.plotly_chart(fte_probability_chart(result["worlds"], project.candidate_names))
+
+    st.header("가능세계")
+
+    render_world_table(result["worlds"], project.candidate_names)
+    render_single_world(result["worlds"], project.candidate_names)
+    render_winner_summary(result["worlds"])
+    render_candidate_extremes(result["worlds"], project.candidate_names)
