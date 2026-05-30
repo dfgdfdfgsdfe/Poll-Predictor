@@ -125,12 +125,10 @@ def generate_simulation_worlds(
 
     )
 
-    latest_sample_size = int(
-
-        dataframe[
-            "sample_size"
-        ].iloc[-1]
-
+    latest_sample_size = (
+        average_sample_size(
+            dataframe
+        )
     )
 
     supports = {}
