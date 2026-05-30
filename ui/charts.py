@@ -2,76 +2,57 @@
 # ui/charts.py
 # =========================================================
 
-import numpy as np
 import pandas as pd
+import numpy as np
 
-import plotly.express as px
 import plotly.graph_objects as go
 
-import streamlit as st
-
 
 # =========================================================
-# 승률 차트
+# 예측 결과 바 차트
 # =========================================================
 
-def render_win_rate_chart(
-    win_rates
+def prediction_bar_chart(
+    prediction_table
 ):
 
-    df = pd.DataFrame({
+    candidates = [
+        row["후보"]
+        for row in prediction_table
+    ]
 
-        "후보":
-            list(
-                win_rates.keys()
-            ),
+    values = [
+        row["예상 득표율"]
+        for row in prediction_table
+    ]
 
-        "승률":
-            list(
-                win_rates.values()
-            )
-    })
+    lowers = [
+        row["95% 하한"]
+        for row in prediction_table
+    ]
 
-    df = df.sort_values(
-        "승률",
-        ascending=False
-    )
+    uppers = [
+        row["95% 상한"]
+        for row in prediction_table
+    ]
 
-    fig = px.bar(
+    error_plus = [
+        u - v
+        for u, v
+        in zip(
+            uppers,
+            values
+        )
+    ]
 
-        df,
-
-        x="후보",
-
-        y="승률",
-
-        text="승률"
-    )
-
-    fig.update_traces(
-        texttemplate="%{y:.1f}%"
-    )
-
-    fig.update_layout(
-
-        title="후보별 승률",
-
-        height=500
-    )
-
-    st.plotly_chart(
-        fig,
-        use_container_width=True
-    )
-
-
-# =========================================================
-# 예상 득표율 차트
-# =========================================================
-
-def render_prediction_chart(
-    result_df
-):
+    error_minus = [
+        v - l
+        for l, v
+        in zip(
+            lowers,
+            values
+        )
+    ]
 
     fig = go.Figure()
 
@@ -79,9 +60,9 @@ def render_prediction_chart(
 
         go.Bar(
 
-            x=result_df["후보"],
+            x=candidates,
 
-            y=result_df["예상 득표율"],
+            y=values,
 
             error_y=dict(
 
@@ -89,213 +70,189 @@ def render_prediction_chart(
 
                 symmetric=False,
 
-                array=(
+                array=error_plus,
 
-                    result_df["95% 상한"]
+                arrayminus=error_minus
 
-                    -
-
-                    result_df["예상 득표율"]
-
-                ),
-
-                arrayminus=(
-
-                    result_df["예상 득표율"]
-
-                    -
-
-                    result_df["95% 하한"]
-
-                )
             )
+
         )
+
     )
 
     fig.update_layout(
 
         title="예상 득표율",
 
-        height=550
-    )
+        xaxis_title="후보",
 
-    st.plotly_chart(
-        fig,
-        use_container_width=True
-    )
-
-
-# =========================================================
-# 후보별 분포
-# =========================================================
-
-def render_distribution_chart(
-    worlds,
-    candidate_names
-):
-
-    st.subheader(
-        "득표율 분포"
-    )
-
-    candidate = st.selectbox(
-
-        "후보 선택",
-
-        candidate_names,
-
-        key="distribution_candidate"
-    )
-
-    values = []
-
-    for world in worlds:
-
-        values.append(
-
-            world[
-                "final_result"
-            ][candidate]
-
-        )
-
-    df = pd.DataFrame({
-
-        "득표율":
-            values
-    })
-
-    fig = px.histogram(
-
-        df,
-
-        x="득표율",
-
-        nbins=25
-    )
-
-    fig.update_layout(
-
-        title=f"{candidate} 득표율 분포",
+        yaxis_title="득표율 (%)",
 
         height=500
+
     )
 
-    st.plotly_chart(
-        fig,
-        use_container_width=True
-    )
+    return fig
 
 
 # =========================================================
-# 가능세계 산점도
+# 승률 차트
 # =========================================================
 
-def render_world_scatter(
-    worlds,
-    candidate_names
+def win_rate_chart(
+    win_rates
 ):
 
-    st.subheader(
-        "가능세계 분포"
+    candidates = list(
+        win_rates.keys()
     )
 
-    if len(
-        candidate_names
-    ) < 2:
+    values = list(
+        win_rates.values()
+    )
 
-        st.info(
-            "후보 2명 이상 필요"
+    fig = go.Figure()
+
+    fig.add_trace(
+
+        go.Bar(
+
+            x=candidates,
+
+            y=values
+
         )
 
-        return
-
-    x_candidate = st.selectbox(
-
-        "X축 후보",
-
-        candidate_names,
-
-        key="scatter_x"
-    )
-
-    y_candidate = st.selectbox(
-
-        "Y축 후보",
-
-        candidate_names,
-
-        index=1,
-
-        key="scatter_y"
-    )
-
-    rows = []
-
-    for world in worlds:
-
-        rows.append({
-
-            "World":
-                world[
-                    "world_id"
-                ],
-
-            "Winner":
-                world[
-                    "winner"
-                ],
-
-            x_candidate:
-
-                world[
-                    "final_result"
-                ][x_candidate],
-
-            y_candidate:
-
-                world[
-                    "final_result"
-                ][y_candidate]
-        })
-
-    df = pd.DataFrame(
-        rows
-    )
-
-    fig = px.scatter(
-
-        df,
-
-        x=x_candidate,
-
-        y=y_candidate,
-
-        color="Winner",
-
-        hover_data=[
-            "World"
-        ]
     )
 
     fig.update_layout(
 
-        title="가능세계 산점도",
+        title="승률",
 
-        height=650
+        xaxis_title="후보",
+
+        yaxis_title="승률 (%)",
+
+        height=500
+
     )
 
-    st.plotly_chart(
-        fig,
-        use_container_width=True
+    return fig
+
+
+# =========================================================
+# 가능세계 분포
+# =========================================================
+
+def world_distribution_chart(
+    worlds,
+    candidate_names
+):
+
+    fig = go.Figure()
+
+    for candidate in candidate_names:
+
+        values = []
+
+        for world in worlds:
+
+            values.append(
+
+                world[
+                    "final_result"
+                ][candidate]
+
+            )
+
+        fig.add_trace(
+
+            go.Histogram(
+
+                x=values,
+
+                name=candidate,
+
+                opacity=0.6,
+
+                nbinsx=20
+
+            )
+
+        )
+
+    fig.update_layout(
+
+        title="가능세계 분포",
+
+        barmode="overlay",
+
+        height=600,
+
+        xaxis_title="득표율",
+
+        yaxis_title="빈도"
+
     )
+
+    return fig
+
+
+# =========================================================
+# 후보별 Box Plot
+# =========================================================
+
+def candidate_boxplot(
+    worlds,
+    candidate_names
+):
+
+    fig = go.Figure()
+
+    for candidate in candidate_names:
+
+        values = []
+
+        for world in worlds:
+
+            values.append(
+
+                world[
+                    "final_result"
+                ][candidate]
+
+            )
+
+        fig.add_trace(
+
+            go.Box(
+
+                y=values,
+
+                name=candidate
+
+            )
+
+        )
+
+    fig.update_layout(
+
+        title="후보별 득표율 분포",
+
+        height=600,
+
+        yaxis_title="득표율 (%)"
+
+    )
+
+    return fig
 
 
 # =========================================================
 # 추세선
 # =========================================================
 
-def render_trend_chart(
+def trend_chart(
     dataframe,
     candidate_names
 ):
@@ -319,7 +276,9 @@ def render_trend_chart(
                 mode="lines+markers",
 
                 name=candidate
+
             )
+
         )
 
     fig.update_layout(
@@ -328,105 +287,129 @@ def render_trend_chart(
 
         height=650,
 
-        xaxis_title="날짜",
+        xaxis_title="조사 종료일",
 
-        yaxis_title="지지율"
+        yaxis_title="지지율 (%)",
+
+        hovermode="x unified"
+
     )
 
-    st.plotly_chart(
-        fig,
-        use_container_width=True
-    )
+    return fig
 
 
 # =========================================================
-# 대표 World 표시
+# 세계 승자 분포
 # =========================================================
 
-def render_representative_world(
-    world,
+def winner_distribution_chart(
+    worlds
+):
+
+    winners = []
+
+    for world in worlds:
+
+        winners.append(
+            world["winner"]
+        )
+
+    counts = pd.Series(
+        winners
+    ).value_counts()
+
+    fig = go.Figure()
+
+    fig.add_trace(
+
+        go.Bar(
+
+            x=counts.index,
+
+            y=counts.values
+
+        )
+
+    )
+
+    fig.update_layout(
+
+        title="100개 세계 승자 분포",
+
+        xaxis_title="후보",
+
+        yaxis_title="승리 횟수",
+
+        height=500
+
+    )
+
+    return fig
+
+
+# =========================================================
+# FiveThirtyEight 스타일
+# =========================================================
+
+def fte_probability_chart(
+    worlds,
     candidate_names
 ):
 
-    rows = []
+    fig = go.Figure()
 
     for candidate in candidate_names:
 
-        rows.append({
+        values = []
 
-            "후보":
-                candidate,
+        for world in worlds:
 
-            "득표율":
-                round(
+            values.append(
 
-                    world[
-                        "final_result"
-                    ][candidate],
+                world[
+                    "final_result"
+                ][candidate]
 
-                    2
-                )
-        })
-
-    df = pd.DataFrame(
-        rows
-    )
-
-    df = df.sort_values(
-        "득표율",
-        ascending=False
-    )
-
-    st.subheader(
-        f"대표 가능세계 (승자: {world['winner']})"
-    )
-
-    st.dataframe(
-        df,
-        use_container_width=True,
-        hide_index=True
-    )
-
-
-# =========================================================
-# FiveThirtyEight 스타일 승률 카드
-# =========================================================
-
-def render_probability_cards(
-    win_rates
-):
-
-    st.subheader(
-        "당선 확률"
-    )
-
-    cols = st.columns(
-        len(
-            win_rates
-        )
-    )
-
-    sorted_items = sorted(
-
-        win_rates.items(),
-
-        key=lambda x: x[1],
-
-        reverse=True
-    )
-
-    for idx, (
-        candidate,
-        probability
-    ) in enumerate(
-        sorted_items
-    ):
-
-        with cols[idx]:
-
-            st.metric(
-
-                candidate,
-
-                f"{probability:.1f}%"
             )
+
+        hist, bins = np.histogram(
+            values,
+            bins=30,
+            density=True
+        )
+
+        centers = (
+            bins[:-1]
+            +
+            bins[1:]
+        ) / 2
+
+        fig.add_trace(
+
+            go.Scatter(
+
+                x=centers,
+
+                y=hist,
+
+                mode="lines",
+
+                name=candidate
+
+            )
+
+        )
+
+    fig.update_layout(
+
+        title="가능세계 확률분포",
+
+        xaxis_title="득표율",
+
+        yaxis_title="밀도",
+
+        height=650
+
+    )
+
+    return fig
