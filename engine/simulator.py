@@ -27,19 +27,18 @@ def calculate_days_until_election(
 ):
 
     latest_poll_date = (
-        dataframe["end_date"]
-        .max()
+        dataframe["end_date"].max()
+    )
+
+    election_date = pd.to_datetime(
+        election_date
     )
 
     delta = (
-
-        election_date
-
-        -
-
-        latest_poll_date
-
+        election_date - latest_poll_date
     ).days
+
+    return max(delta, 0)
 
     return max(
         delta,
