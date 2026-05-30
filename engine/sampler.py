@@ -128,8 +128,12 @@ def sample_undecided_preferences(
     sample_size
 ):
 
+    effective_sample_size = (
+        sample_size * 0.5
+    )
+
     strength = max(
-        sample_size,
+        effective_sample_size,
         50
     )
 
