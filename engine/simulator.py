@@ -40,11 +40,6 @@ def calculate_days_until_election(
 
     return max(delta, 0)
 
-    return max(
-        delta,
-        0
-    )
-
 
 # =========================================================
 # 최신 무당층 선호
