@@ -5,8 +5,7 @@
 import numpy as np
 
 from engine.state_space import (
-    estimate_state_space,
-    forecast_to_election
+    build_forecast_package
 )
 
 from engine.sampler import (
@@ -18,12 +17,12 @@ from engine.sampler import (
 # 선거일까지 남은 일수
 # =========================================================
 
-def days_until_election(
+def calculate_days_until_election(
     dataframe,
     election_date
 ):
 
-    latest_poll = (
+    latest_poll_date = (
         dataframe["end_date"]
         .max()
     )
@@ -34,7 +33,7 @@ def days_until_election(
 
         -
 
-        latest_poll
+        latest_poll_date
 
     ).days
 
@@ -48,12 +47,14 @@ def days_until_election(
 # 최신 무당층 선호
 # =========================================================
 
-def latest_preferences(
+def latest_undecided_preferences(
     dataframe,
     candidate_names
 ):
 
-    latest = dataframe.iloc[-1]
+    latest_row = (
+        dataframe.iloc[-1]
+    )
 
     result = {}
 
@@ -61,7 +62,7 @@ def latest_preferences(
 
         result[candidate] = float(
 
-            latest[
+            latest_row[
                 f"{candidate}_pref"
             ]
 
@@ -71,94 +72,46 @@ def latest_preferences(
 
 
 # =========================================================
-# Forecast 생성
-# =========================================================
-
-def build_forecast(
-    dataframe,
-    candidate_names,
-    election_date
-):
-
-    state_space = (
-
-        estimate_state_space(
-
-            dataframe,
-
-            candidate_names
-
-        )
-
-    )
-
-    days = days_until_election(
-
-        dataframe,
-
-        election_date
-
-    )
-
-    forecast = (
-
-        forecast_to_election(
-
-            state_space,
-
-            days
-
-        )
-
-    )
-
-    return {
-
-        "state_space":
-            state_space,
-
-        "forecast":
-            forecast,
-
-        "days":
-            days
-    }
-
-
-# =========================================================
 # World 생성
 # =========================================================
 
-def simulate_worlds(
+def generate_simulation_worlds(
     dataframe,
     candidate_names,
     election_date,
-    n_worlds=100
+    world_count=100
 ):
 
-    forecast_data = (
+    days_until_election = (
+        calculate_days_until_election(
+            dataframe,
+            election_date
+        )
+    )
 
-        build_forecast(
+    forecast_package = (
+
+        build_forecast_package(
 
             dataframe,
 
             candidate_names,
 
-            election_date
+            days_until_election
 
         )
 
     )
 
     forecast = (
-        forecast_data[
+        forecast_package[
             "forecast"
         ]
     )
 
     preferences = (
 
-        latest_preferences(
+        latest_undecided_preferences(
 
             dataframe,
 
@@ -191,7 +144,7 @@ def simulate_worlds(
     worlds = []
 
     for world_id in range(
-        n_worlds
+        world_count
     ):
 
         world = generate_world(
@@ -226,15 +179,18 @@ def simulate_worlds(
 
         "state_space":
 
-            forecast_data[
+            forecast_package[
                 "state_space"
             ],
 
-        "days_until_election":
+        "summary":
 
-            forecast_data[
-                "days"
-            ]
+            forecast_package[
+                "summary"
+            ],
+
+        "days_until_election":
+            days_until_election
     }
 
 
@@ -269,13 +225,13 @@ def calculate_win_rates(
         worlds
     )
 
-    rates = {}
+    result = {}
 
-    for candidate, wins in counts.items():
+    for winner, count in counts.items():
 
-        rates[candidate] = (
+        result[winner] = (
 
-            wins
+            count
 
             /
 
@@ -283,11 +239,11 @@ def calculate_win_rates(
 
         ) * 100
 
-    return rates
+    return result
 
 
 # =========================================================
-# 결과 테이블
+# 후보별 예측 테이블
 # =========================================================
 
 def build_prediction_table(
@@ -318,27 +274,37 @@ def build_prediction_table(
 
             "예상 득표율":
 
-                float(
-                    np.mean(values)
+                round(
+                    float(
+                        np.mean(values)
+                    ),
+                    2
                 ),
 
             "95% 하한":
 
-                float(
-                    np.percentile(
-                        values,
-                        2.5
-                    )
+                round(
+                    float(
+                        np.percentile(
+                            values,
+                            2.5
+                        )
+                    ),
+                    2
                 ),
 
             "95% 상한":
 
-                float(
-                    np.percentile(
-                        values,
-                        97.5
-                    )
+                round(
+                    float(
+                        np.percentile(
+                            values,
+                            97.5
+                        )
+                    ),
+                    2
                 )
+
         })
 
     rows.sort(
@@ -347,6 +313,92 @@ def build_prediction_table(
         x["예상 득표율"],
 
         reverse=True
+
     )
 
     return rows
+
+
+# =========================================================
+# 전체 실행
+# =========================================================
+
+def run_simulation(
+    dataframe,
+    candidate_names,
+    election_date,
+    world_count=100
+):
+
+    simulation = (
+
+        generate_simulation_worlds(
+
+            dataframe,
+
+            candidate_names,
+
+            election_date,
+
+            world_count
+
+        )
+
+    )
+
+    worlds = (
+        simulation[
+            "worlds"
+        ]
+    )
+
+    win_rates = (
+        calculate_win_rates(
+            worlds
+        )
+    )
+
+    prediction_table = (
+
+        build_prediction_table(
+
+            worlds,
+
+            candidate_names
+
+        )
+
+    )
+
+    return {
+
+        "worlds":
+            worlds,
+
+        "forecast":
+            simulation[
+                "forecast"
+            ],
+
+        "state_space":
+            simulation[
+                "state_space"
+            ],
+
+        "summary":
+            simulation[
+                "summary"
+            ],
+
+        "win_rates":
+            win_rates,
+
+        "prediction_table":
+            prediction_table,
+
+        "days_until_election":
+
+            simulation[
+                "days_until_election"
+            ]
+    }
