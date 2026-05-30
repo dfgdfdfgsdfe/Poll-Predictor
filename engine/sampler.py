@@ -6,260 +6,197 @@ import numpy as np
 
 
 # =========================================================
-# Dirichlet Alpha 생성
+# Dirichlet 샘플링
 # =========================================================
 
-def build_alpha_from_percentages(
+def sample_dirichlet(
     percentages,
-    sample_size
+    strength
 ):
-    """
-    percentages
 
-    [44,39,7,10]
-
-    sample_size
-
-    1000
-
-    →
-    alpha
-    """
-
-    alpha = []
-
-    for pct in percentages:
-
-        count = (
-
-            pct
-            /
-            100.0
-
-        ) * sample_size
-
-        alpha.append(
-            count + 1
-        )
-
-    return alpha
-
-
-# =========================================================
-# 후보 + 무지지자 샘플링
-# =========================================================
-
-def sample_vote_shares(
-    supports,
-    undecided,
-    sample_size
-):
-    """
-    반환
-
-    {
-        A:44.2,
-        B:38.8,
-        C:7.3,
-        UNDECIDED:9.7
-    }
-    """
-
-    labels = list(
-        supports.keys()
+    keys = list(
+        percentages.keys()
     )
 
-    percentages = []
+    values = np.array([
 
-    for candidate in labels:
+        percentages[k]
 
-        percentages.append(
-            supports[candidate]
-        )
+        for k in keys
 
-    percentages.append(
-        undecided
+    ])
+
+    values = np.clip(
+        values,
+        0.0001,
+        None
     )
 
     alpha = (
-        build_alpha_from_percentages(
-            percentages,
-            sample_size
-        )
-    )
 
-    draw = np.random.dirichlet(
+        values
+        / values.sum()
+
+    ) * strength
+
+    sampled = np.random.dirichlet(
         alpha
     )
 
     result = {}
 
-    for idx, candidate in enumerate(
-        labels
+    for k, v in zip(
+        keys,
+        sampled
     ):
 
-        result[candidate] = (
-            draw[idx]
+        result[k] = (
+            float(v)
             * 100
         )
-
-    result["UNDECIDED"] = (
-        draw[-1]
-        * 100
-    )
 
     return result
 
 
 # =========================================================
-# 무당층 선호 샘플링
+# 후보 지지율 샘플링
 # =========================================================
 
-def sample_undecided_preferences(
-    undecided_preferences,
-    undecided_share,
+def sample_candidate_supports(
+    supports,
     sample_size
 ):
-    """
-    무지지자 규모에 따라
-    유효 표본수 계산
 
-    예
+    strength = max(
+        sample_size,
+        50
+    )
 
-    10%
+    return sample_dirichlet(
 
-    ×
+        supports,
 
-    1000
+        strength
 
-    =
+    )
 
-    100명
-    """
 
-    effective_n = max(
+# =========================================================
+# 무지지자 규모 샘플링
+# =========================================================
 
-        1,
+def sample_undecided_size(
+    undecided_pct,
+    sample_size
+):
 
-        round(
+    p = undecided_pct / 100
 
-            sample_size
+    n = max(
+        sample_size,
+        1
+    )
 
-            *
+    se = np.sqrt(
+        p * (1 - p) / n
+    )
 
-            undecided_share
+    sampled = np.random.normal(
+        undecided_pct,
+        se * 100
+    )
 
-            /
-
+    return float(
+        np.clip(
+            sampled,
+            0,
             100
-
         )
     )
 
-    labels = list(
-        undecided_preferences.keys()
+
+# =========================================================
+# 무지지자 선호 샘플링
+# =========================================================
+
+def sample_undecided_preferences(
+    preferences,
+    sample_size
+):
+
+    strength = max(
+        sample_size,
+        50
     )
 
-    percentages = []
+    return sample_dirichlet(
 
-    for candidate in labels:
+        preferences,
 
-        percentages.append(
+        strength
+
+    )
+
+
+# =========================================================
+# 무지지자 재배분
+# =========================================================
+
+def allocate_undecided(
+    candidate_supports,
+    undecided_size,
+    undecided_preferences
+):
+
+    final_result = {}
+
+    for candidate in candidate_supports:
+
+        base_support = (
+            candidate_supports[
+                candidate
+            ]
+        )
+
+        undecided_share = (
+
+            undecided_size
+
+            *
 
             undecided_preferences[
                 candidate
             ]
 
+            / 100
+
         )
 
-    alpha = (
-        build_alpha_from_percentages(
-            percentages,
-            effective_n
-        )
-    )
+        final_result[candidate] = (
 
-    draw = np.random.dirichlet(
-        alpha
-    )
-
-    result = {}
-
-    for idx, candidate in enumerate(
-        labels
-    ):
-
-        result[candidate] = (
-            draw[idx]
-            * 100
-        )
-
-    return result
-
-
-# =========================================================
-# 무지지자 배분
-# =========================================================
-
-def allocate_undecided(
-    sampled_supports,
-    sampled_preferences
-):
-    """
-    최종 득표율 계산
-    """
-
-    undecided = (
-
-        sampled_supports[
-            "UNDECIDED"
-        ]
-
-    )
-
-    result = {}
-
-    for candidate in sampled_preferences:
-
-        result[candidate] = (
-
-            sampled_supports[
-                candidate
-            ]
+            base_support
 
             +
 
-            undecided
-
-            *
-
-            (
-
-                sampled_preferences[
-                    candidate
-                ]
-
-                /
-
-                100
-
-            )
+            undecided_share
 
         )
 
     total = sum(
-        result.values()
+        final_result.values()
     )
 
     if total <= 0:
 
         total = 1
 
-    for candidate in result:
+    for candidate in final_result:
 
-        result[candidate] = (
+        final_result[candidate] = (
 
-            result[candidate]
+            final_result[
+                candidate
+            ]
 
             /
 
@@ -267,11 +204,25 @@ def allocate_undecided(
 
         ) * 100
 
-    return result
+    return final_result
 
 
 # =========================================================
-# 단일 World 생성
+# 승자 결정
+# =========================================================
+
+def determine_winner(
+    final_result
+):
+
+    return max(
+        final_result,
+        key=final_result.get
+    )
+
+
+# =========================================================
+# World 생성
 # =========================================================
 
 def generate_world(
@@ -280,15 +231,22 @@ def generate_world(
     undecided_preferences,
     sample_size
 ):
-    """
-    가능세계 1개
-    """
 
     sampled_supports = (
 
-        sample_vote_shares(
+        sample_candidate_supports(
 
             supports,
+
+            sample_size
+
+        )
+
+    )
+
+    sampled_undecided = (
+
+        sample_undecided_size(
 
             undecided,
 
@@ -304,10 +262,6 @@ def generate_world(
 
             undecided_preferences,
 
-            sampled_supports[
-                "UNDECIDED"
-            ],
-
             sample_size
 
         )
@@ -320,21 +274,27 @@ def generate_world(
 
             sampled_supports,
 
+            sampled_undecided,
+
             sampled_preferences
 
         )
 
     )
 
-    winner = max(
-        final_result,
-        key=final_result.get
+    winner = (
+        determine_winner(
+            final_result
+        )
     )
 
     return {
 
         "sampled_supports":
             sampled_supports,
+
+        "sampled_undecided":
+            sampled_undecided,
 
         "sampled_preferences":
             sampled_preferences,
@@ -345,93 +305,3 @@ def generate_world(
         "winner":
             winner
     }
-
-
-# =========================================================
-# 다중 World 생성
-# =========================================================
-
-def generate_worlds(
-    supports,
-    undecided,
-    undecided_preferences,
-    sample_size,
-    n_worlds=100
-):
-    worlds = []
-
-    for world_id in range(
-        n_worlds
-    ):
-
-        world = generate_world(
-
-            supports,
-
-            undecided,
-
-            undecided_preferences,
-
-            sample_size
-
-        )
-
-        world[
-            "world_id"
-        ] = (
-            world_id + 1
-        )
-
-        worlds.append(
-            world
-        )
-
-    return worlds
-
-
-# =========================================================
-# 승률 계산
-# =========================================================
-
-def calculate_win_rates(
-    worlds
-):
-
-    counts = {}
-
-    for world in worlds:
-
-        winner = world[
-            "winner"
-        ]
-
-        counts[winner] = (
-
-            counts.get(
-                winner,
-                0
-            )
-
-            + 1
-
-        )
-
-    total = len(
-        worlds
-    )
-
-    results = {}
-
-    for candidate, wins in counts.items():
-
-        results[candidate] = (
-
-            wins
-
-            /
-
-            total
-
-        ) * 100
-
-    return results
